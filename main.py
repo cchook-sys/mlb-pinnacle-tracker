@@ -23,7 +23,7 @@ MARKETS = "h2h,totals,spreads"
 ODDS_FORMAT = "american"
 BASE_URL = "https://api.the-odds-api.com/v4"
 # ── Database (TinyDB = single JSON file, zero config) ─────────────────────────
-db = TinyDB("snapshots.json")
+db = TinyDB("/data/snapshots.json")
 snaps_tbl = db.table("snapshots") # 每次快照的原始數據
 history_tbl = db.table("history") # 每場比賽的移動歷史
 # ── Fetch + Store ─────────────────────────────────────────────────────────────
