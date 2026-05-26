@@ -2,9 +2,9 @@ services:
   - type: web
     name: mlb-pinnacle-tracker
     env: python
-    buildCommand: pip install -r requirements. text
-    startCommand: uvicorn main: app --host 0.0.0.0  --port $PORT
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     disk:
       name: snapshots-db
-      mountpath: /data
+      mountPath: /data
       sizeGB: 1
