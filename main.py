@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from tinydb import TinyDB, Query
+from tinydb.storages import MemoryStorage
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,7 +29,7 @@ ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
 # ── Database (TinyDB = single JSON file, zero config) ─────────────────────────
-db         = TinyDB("/data/snapshots.json")
+db         = TinyDB(storage=MemoryStorage)
 snaps_tbl  = db.table("snapshots")   # 每次快照的原始數據
 history_tbl = db.table("history")    # 每場比賽的移動歷史
 
