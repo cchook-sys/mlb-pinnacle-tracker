@@ -141,10 +141,12 @@ async def lifespan(app: FastAPI):
 # ── FastAPI App ───────────────────────────────────────────────────────────────
 app = FastAPI(title="MLB Pinnacle Tracker", lifespan=lifespan)
 
+# 🛠️ 修正後的 CORS 設定：全面允許跨網域請求，防止前端 index.html 連線被擋
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 前端 Artifact 呼叫需要
-    allow_methods=["GET"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],  # 從 ["GET"] 改成 ["*"] 完美支援所有瀏覽器預檢請求
     allow_headers=["*"],
 )
 
