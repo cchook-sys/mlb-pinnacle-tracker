@@ -29,7 +29,7 @@ ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
 # ── Database (TinyDB = single JSON file, zero config) ─────────────────────────
-db         = TinyDB(storage=MemoryStorage)
+db         = TinyDB("/tmp/db.json")
 snaps_tbl  = db.table("snapshots")   # 每次快照的原始數據
 history_tbl = db.table("history")    # 每場比賽的移動歷史
 
@@ -130,10 +130,10 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     # 啟動時立刻抓一次
     await fetch_and_store()
-    # 之後每 30 分鐘
-    scheduler.add_job(fetch_and_store, "interval", minutes=30, id="pinnacle_fetch")
+    # 之後每 10 分鐘
+    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.start()
-    print("⏰ 排程啟動：每 30 分鐘抓一次 Pinnacle")
+    print("⏰ 排程啟動：每 10 分鐘抓一次 Pinnacle")
     yield
     scheduler.shutdown()
 
