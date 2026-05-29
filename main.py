@@ -130,10 +130,10 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     # 啟動時立刻抓一次
     await fetch_and_store()
-    # 之後每 10 分鐘
-    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
+    # 之後每 5 分鐘
+    scheduler.add_job(fetch_and_store, "interval", minutes=5, id="pinnacle_fetch")
     scheduler.start()
-    print("⏰ 排程啟動：每 10 分鐘抓一次 Pinnacle")
+    print("⏰ 排程啟動：每 5 分鐘抓一次 Pinnacle")
     yield
     scheduler.shutdown()
 
