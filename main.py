@@ -1,8 +1,8 @@
 """
-MLB Pinnacle 盤口快照 + 賽果結算後端 (MongoDB 終極安全防護免崩潰版)
+MLB Pinnacle 盤口快照 + 賽果結算後端 (MongoDB 終極 CORS 安全防護免崩潰版)
 - 智慧配額防禦：台灣時間中午 12:30 到傍晚 17:30 自動休眠
 - 數據去重防禦：盤口未變動時跳過寫入，消滅垃圾數據
-- 空值安全防禦：全方位保護 API 欄位計算，徹底杜絕 500 Internal Server Error
+- CORS 終極防禦：全方位放行前端跨網域請求，徹底解決 Chrome 封鎖問題
 """
 
 import os
@@ -207,22 +207,23 @@ async def lifespan(app: FastAPI):
     yield
     scheduler.shutdown()
 
-# ── FastAPI App ───────────────────────────────────────────────────────────────
+# ── 💡 核心 CORS 權限完全開放優化 ────────────────────────────────────────────────
 app = FastAPI(title="MLB Pinnacle Tracker (Protected)", lifespan=lifespan)
 
+# 確保這個 Middleware 設定完全包覆所有路徑
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 @app.get("/")
 def root():
     return {"status": "ok", "service": "MLB Protected Tracker", "database": "MongoDB Atlas"}
 
-# ── 💡 核心 Bug 修復區：全方位空值防護 ───────────────────────────────────────────
 @app.get("/games")
 def get_games():
     cutoff_time = datetime.fromtimestamp(time.time() - (4 * 3600), tz=timezone.utc).isoformat()
@@ -240,7 +241,6 @@ def get_games():
         latest = snaps_sorted[-1]
         first  = snaps_sorted[0]
 
-        # 🛡️ 加上完善的 None 檢查，防止相減時發生 TypeError 崩潰
         total_delta = 0
         if latest.get("total") is not None and first.get("total") is not None:
             total_delta = round(float(latest["total"]) - float(first["total"]), 2)
@@ -262,74 +262,3 @@ def get_games():
             "game_id":       gid,
             "home":          latest["home"],
             "away":          latest["away"],
-            "commence_time": latest["commence_time"],
-            "snapshot_count": len(snaps_sorted),
-            "first_snap_ts": first.get("ts_iso"),
-            "latest": {
-                "ts":          latest.get("ts_iso"),
-                "total":       latest.get("total"),
-                "over_juice":  latest.get("over_juice"),
-                "under_juice": latest.get("under_juice"),
-                "ml_home":     latest.get("ml_home"),
-                "ml_away":     latest.get("ml_away"),
-                "spread_home": latest.get("spread_home"),
-            },
-            "open": {
-                "total":   first.get("total"),
-                "ml_home": first.get("ml_home"),
-                "ml_away": first.get("ml_away"),
-            },
-            "delta": {
-                "total":   total_delta,
-                "ml_home": ml_home_delta,
-            },
-            "signal": {
-                "total": total_signal,
-                "ml":    ml_signal,
-            },
-            "history": [
-                {
-                    "ts":       s.get("ts_iso"),
-                    "total":    s.get("total"),
-                    "ml_home":  s.get("ml_home"),
-                    "ml_away":  s.get("ml_away"),
-                }
-                for s in snaps_sorted
-            ],
-        })
-
-    result.sort(key=lambda x: x["commence_time"])
-    return result
-
-@app.get("/analytics/dataset")
-def get_training_dataset():
-    results = list(results_col.find({}, {"_id": 0}))
-    dataset = []
-    
-    for r in results:
-        gid = r["game_id"]
-        snaps = list(snaps_col.find({"game_id": gid}, {"_id": 0}).sort("ts", pymongo.ASCENDING))
-        if not snaps: continue
-        
-        first = snaps[0]
-        last = snaps[-1]
-        
-        dataset.append({
-            "game_id": gid,
-            "home": r["home"],
-            "away": r["away"],
-            "commence_time": r["commence_time"],
-            "opening_total": first.get("total"),
-            "closing_total": last.get("total"),
-            "total_changed_delta": round((last.get("total", 0) - first.get("total", 0)), 2) if (last.get("total") and first.get("total")) else 0,
-            "opening_ml_home": first.get("ml_home"),
-            "closing_ml_home": last.get("ml_home"),
-            "snapshot_records_count": len(snaps),
-            "final_home_score": r["home_score"],
-            "final_away_score": r["away_score"],
-            "final_total_score": r["total_score"],
-            "ml_winner_result": r["ml_winner"],
-            "opening_total_result": r["opening_total_result"],
-            "closing_total_result": r["closing_total_result"]
-        })
-    return dataset
