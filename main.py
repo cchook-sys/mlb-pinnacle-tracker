@@ -1,7 +1,7 @@
 """
-MLB Pinnacle 盤口快照後端
-- 每 30 分鐘自動抓一次 Pinnacle MLB 賠率
-- 儲存每場比賽的歷史快照
+MLB Pinnacle 盤口快照後端 (MongoDB 版)
+- 每 10 分鐘自動抓一次 Pinnacle MLB 賠率
+- 永久儲存每場比賽的歷史快照至 MongoDB Atlas
 - 提供 REST API 給前端儀表板讀取
 """
 
@@ -14,8 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from tinydb import TinyDB, Query
-from tinydb.storages import MemoryStorage
+import pymongo
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,14 +27,21 @@ MARKETS      = "h2h,totals,spreads"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
-# ── Database (TinyDB = single JSON file, zero config) ─────────────────────────
-db         = TinyDB("/tmp/db.json")
-snaps_tbl  = db.table("snapshots")   # 每次快照的原始數據
-history_tbl = db.table("history")    # 每場比賽的移動歷史
+# ── Database (MongoDB Atlas) ──────────────────────────────────────────────────
+# 💡 這裡已經替你換上編碼過密碼的完美連線字串
+MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
+try:
+    client = pymongo.MongoClient(MONGO_URI)
+    db = client["mlb_tracker"]         # 建立一個名為 mlb_tracker 的資料庫
+    snaps_col = db["snapshots"]        # 建立一個名為 snapshots 的集合 (相當於資料表)
+    print("✅ 成功連線至 MongoDB Atlas 雲端資料庫！")
+except Exception as e:
+    print(f"❌ MongoDB 連線失敗: {e}")
 
 # ── Fetch + Store ─────────────────────────────────────────────────────────────
 async def fetch_and_store():
-    """從 The Odds API 抓 Pinnacle 賠率，存進 TinyDB"""
+    """從 The Odds API 抓 Pinnacle 賠率，存進 MongoDB"""
     if not ODDS_API_KEY:
         print("❌ 缺少 ODDS_API_KEY")
         return
@@ -96,32 +102,25 @@ async def fetch_and_store():
                     "spread_home":  sp_home["point"] if sp_home else None,
                 }
 
-                # 只在數據有變化時才存（避免重複快照）
-                G = Query()
-                last = (
-                    snaps_tbl.search(G.game_id == game["id"])
-                )
-                last = sorted(last, key=lambda x: x["ts"])[-1] if last else None
+                # MongoDB: 尋找該場比賽的最後一筆快照
+                last_snap = snaps_col.find_one({"game_id": game["id"]}, sort=[("ts", pymongo.DESCENDING)])
 
                 changed = (
-                    not last
-                    or last.get("total")   != snap["total"]
-                    or last.get("ml_home") != snap["ml_home"]
-                    or last.get("ml_away") != snap["ml_away"]
+                    not last_snap
+                    or last_snap.get("total")   != snap["total"]
+                    or last_snap.get("ml_home") != snap["ml_home"]
+                    or last_snap.get("ml_away") != snap["ml_away"]
                 )
 
-                # 每 30 分鐘強制存一次（即使沒變化，留下時間軸記錄）
-                force = not last or (ts - last["ts"]) >= 1800
-
-                if changed or force:
-                    snaps_tbl.insert(snap)
+                # 每 10 分鐘強制存一次（因為我們排程是 10 分鐘，有抓就存，累積密集的曲線）
+                if changed or not last_snap or (ts - last_snap["ts"]) >= 500:
+                    snaps_col.insert_one(snap)
                     stored += 1
 
-            print(f"✅ 儲存 {stored}/{len(games)} 場快照")
+            print(f"✅ 儲存 {stored}/{len(games)} 場快照至 MongoDB")
 
     except Exception as e:
         print(f"❌ fetch 失敗: {e}")
-
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
@@ -130,44 +129,38 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     # 啟動時立刻抓一次
     await fetch_and_store()
-    # 之後每 5 分鐘
-    scheduler.add_job(fetch_and_store, "interval", minutes=5, id="pinnacle_fetch")
+    # 之後每 10 分鐘抓一次
+    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.start()
-    print("⏰ 排程啟動：每 5 分鐘抓一次 Pinnacle")
+    print("⏰ 排程啟動：每 10 分鐘自動抓取並寫入 MongoDB")
     yield
     scheduler.shutdown()
 
-
 # ── FastAPI App ───────────────────────────────────────────────────────────────
-app = FastAPI(title="MLB Pinnacle Tracker", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker (MongoDB)", lifespan=lifespan)
 
-# 🛠️ 修正後的 CORS 設定：全面允許跨網域請求，防止前端 index.html 連線被擋
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # 從 ["GET"] 改成 ["*"] 完美支援所有瀏覽器預檢請求
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
 # ── API Endpoints ─────────────────────────────────────────────────────────────
-
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "MLB Pinnacle Tracker"}
-
+    return {"status": "ok", "service": "MLB Pinnacle Tracker", "database": "MongoDB Atlas"}
 
 @app.get("/games")
 def get_games():
-    """
-    回傳今天所有比賽 + 每場的完整快照歷史
-    前端用這個畫移動曲線和計算破口
-    """
-    G = Query()
-    all_snaps = snaps_tbl.all()
+    """回傳所有比賽 + 每場的完整快照歷史給前端"""
+    # 找出所有還沒開打，或是開打不到 4 小時的比賽
+    cutoff_time = datetime.fromtimestamp(time.time() - (4 * 3600), tz=timezone.utc).isoformat()
+    
+    # 這裡我們需要把 MongoDB 回傳的 _id (ObjectId 型態) 濾掉，不然 FastAPI 轉 JSON 會報錯
+    all_snaps = list(snaps_col.find({"commence_time": {"$gte": cutoff_time}}, {"_id": 0}))
 
-    # 按 game_id 分組
     games: dict[str, list] = {}
     for s in all_snaps:
         gid = s["game_id"]
@@ -181,7 +174,6 @@ def get_games():
         latest = snaps_sorted[-1]
         first  = snaps_sorted[0]
 
-        # 計算移動幅度
         total_delta = None
         ml_home_delta = None
         if latest.get("total") is not None and first.get("total") is not None:
@@ -189,7 +181,6 @@ def get_games():
         if latest.get("ml_home") is not None and first.get("ml_home") is not None:
             ml_home_delta = latest["ml_home"] - first["ml_home"]
 
-        # 破口信號
         total_signal = "FLAT"
         if total_delta is not None:
             if   abs(total_delta) >= 0.5: total_signal = "STEAM_OVER"  if total_delta > 0 else "STEAM_UNDER"
@@ -228,7 +219,6 @@ def get_games():
                 "total": total_signal,
                 "ml":    ml_signal,
             },
-            # 完整時間序列，前端畫折線圖用
             "history": [
                 {
                     "ts":       s["ts_iso"],
@@ -240,23 +230,12 @@ def get_games():
             ],
         })
 
-    # 按開賽時間排序
     result.sort(key=lambda x: x["commence_time"])
     return result
-
-
-@app.get("/games/{game_id}/history")
-def get_game_history(game_id: str):
-    """單場比賽的完整快照歷史"""
-    G = Query()
-    snaps = snaps_tbl.search(G.game_id == game_id)
-    return sorted(snaps, key=lambda x: x["ts"])
-
 
 @app.delete("/snapshots/old")
 def purge_old_snapshots(days: int = 3):
     """清除 N 天前的快照（節省空間）"""
     cutoff = int(time.time()) - (days * 86400)
-    G = Query()
-    removed = snaps_tbl.remove(G.ts < cutoff)
-    return {"removed": len(removed)}
+    result = snaps_col.delete_many({"ts": {"$lt": cutoff}})
+    return {"removed": result.deleted_count}
