@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pymongo
+import certifi  # 💡 新增：用來解決 SSL handshake failed 的憑證套件
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,13 +29,13 @@ ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
 # ── Database (MongoDB Atlas) ──────────────────────────────────────────────────
-# 💡 這裡已經替你換上編碼過密碼的完美連線字串
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 try:
-    client = pymongo.MongoClient(MONGO_URI)
-    db = client["mlb_tracker"]         # 建立一個名為 mlb_tracker 的資料庫
-    snaps_col = db["snapshots"]        # 建立一個名為 snapshots 的集合 (相當於資料表)
+    # 💡 新增：tlsCAFile=certifi.where() 強制使用最新的安全憑證連線
+    client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+    db = client["mlb_tracker"]
+    snaps_col = db["snapshots"]
     print("✅ 成功連線至 MongoDB Atlas 雲端資料庫！")
 except Exception as e:
     print(f"❌ MongoDB 連線失敗: {e}")
@@ -102,7 +103,6 @@ async def fetch_and_store():
                     "spread_home":  sp_home["point"] if sp_home else None,
                 }
 
-                # MongoDB: 尋找該場比賽的最後一筆快照
                 last_snap = snaps_col.find_one({"game_id": game["id"]}, sort=[("ts", pymongo.DESCENDING)])
 
                 changed = (
@@ -112,7 +112,6 @@ async def fetch_and_store():
                     or last_snap.get("ml_away") != snap["ml_away"]
                 )
 
-                # 每 10 分鐘強制存一次（因為我們排程是 10 分鐘，有抓就存，累積密集的曲線）
                 if changed or not last_snap or (ts - last_snap["ts"]) >= 500:
                     snaps_col.insert_one(snap)
                     stored += 1
@@ -127,9 +126,7 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 啟動時立刻抓一次
     await fetch_and_store()
-    # 之後每 10 分鐘抓一次
     scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.start()
     print("⏰ 排程啟動：每 10 分鐘自動抓取並寫入 MongoDB")
@@ -154,11 +151,7 @@ def root():
 
 @app.get("/games")
 def get_games():
-    """回傳所有比賽 + 每場的完整快照歷史給前端"""
-    # 找出所有還沒開打，或是開打不到 4 小時的比賽
     cutoff_time = datetime.fromtimestamp(time.time() - (4 * 3600), tz=timezone.utc).isoformat()
-    
-    # 這裡我們需要把 MongoDB 回傳的 _id (ObjectId 型態) 濾掉，不然 FastAPI 轉 JSON 會報錯
     all_snaps = list(snaps_col.find({"commence_time": {"$gte": cutoff_time}}, {"_id": 0}))
 
     games: dict[str, list] = {}
@@ -232,10 +225,3 @@ def get_games():
 
     result.sort(key=lambda x: x["commence_time"])
     return result
-
-@app.delete("/snapshots/old")
-def purge_old_snapshots(days: int = 3):
-    """清除 N 天前的快照（節省空間）"""
-    cutoff = int(time.time()) - (days * 86400)
-    result = snaps_col.delete_many({"ts": {"$lt": cutoff}})
-    return {"removed": result.deleted_count}
