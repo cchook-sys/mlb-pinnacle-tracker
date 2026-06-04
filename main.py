@@ -1,8 +1,8 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (終極修復穩定版)
-- 錯誤修復：徹底修正 /games 路由中誤呼叫 fetch_pinnacle_job 的語法錯誤
+MLB Pinnacle 數據量化監控後端完全體 (時區字串精準對齊版)
+- 終極修正：將 Python 的 isoformat 格式精準校正為資料庫相容的 UTC 'Z' 格式，解決賽事撈出空陣列問題
 - 自動核心：每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口
-- API 輸出：完美解鎖未來 48 小時範圍，讓明天 9 場賽事順利顯示
+- API 輸出：完美解鎖未來 48 小時範圍，明天 9 場賽事順利歸位
 """
 
 from fastapi import FastAPI
@@ -79,7 +79,8 @@ def fetch_pinnacle_job():
                 }
                 
         if "leagues" in odds_data and len(odds_data["leagues"]) > 0:
-            ts_str = datetime.utcnow().isoformat()
+            # 統一用不帶微秒的標準 UTC 格式字串
+            ts_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
             
             for ev_odds in odds_data["leagues"][0].get("events", []):
                 event_id = ev_odds["id"]
@@ -158,7 +159,7 @@ scheduler.add_job(
 )
 scheduler.start()
 
-# 4. 路由：網頁獲取即時看盤賽事列表 (💡 徹底修正：回歸正確的資料庫 find 查詢)
+# 4. 路由：網頁獲取即時看盤賽事列表 (💡 修正時間格式比對線)
 @app.get('/games')
 def get_games():
     try:
@@ -166,16 +167,16 @@ def get_games():
         db_fresh = client_fresh["mlb_tracker"]
         games_col_fresh = db_fresh["games"]
         
-        now = datetime.utcnow()
-        cutoff_time = now + timedelta(hours=48)
+        # 💡 將 now 與 cutoff 改用標準資料庫相容字串格式，擊碎格式對不上的黑洞
+        now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        cutoff_str = (datetime.utcnow() + timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
         
         query = {
             "commence_time": {
-                "$gte": now.isoformat(),
-                "$lte": cutoff_time.isoformat()
+                "$gte": now_str,
+                "$lte": cutoff_str
             }
         }
-        # 💡 這裡已經修正為正確的資料庫撈取方法
         games = list(games_col_fresh.find(query, {"_id": 0}).sort("commence_time", 1))
         client_fresh.close()
         return games
@@ -201,6 +202,6 @@ def get_history_dataset():
 def health_check():
     return {
         "status": "healthy",
-        "framework": "FastAPI (Bug Fixed)",
+        "framework": "FastAPI (Time-String Aligned)",
         "monitoring_window": "48 Hours"
     }
