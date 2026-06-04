@@ -4,3 +4,4 @@ pymongo
 certifi
 requests
 apscheduler
+gunicorn
