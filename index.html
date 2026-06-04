@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板 - 終極完全體</title>
+    <title>MLB Pinnacle 數據量化儀表板 - 實戰下單終極版</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -52,7 +52,14 @@
                         </div>
                     </div>
 
-                    <!-- 📊 大數據歷史勝率特徵動態校正面板 (改為永久常駐) -->
+                    <!-- 💡 終極靈魂功能：一眼秒懂的【實戰最終下單推薦】大看板 -->
+                    <div id="final-verdict-panel" class="p-4 rounded-xl border flex flex-col gap-1.5 font-sans shadow-lg">
+                        <div class="text-[11px] text-gray-400 font-bold uppercase tracking-wider">🎯 大數據量化・實戰最終下單推薦</div>
+                        <div id="final-verdict-title" class="text-xl md:text-2xl font-black tracking-wide">--</div>
+                        <div id="final-verdict-desc" class="text-xs text-gray-300 leading-relaxed font-medium mt-0.5">--</div>
+                    </div>
+
+                    <!-- 大數據歷史勝率特徵動態校正面板 -->
                     <div id="feedback-calibration-panel" class="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <span class="text-xl">📊</span>
@@ -64,13 +71,13 @@
                         <span id="calibration-rating" class="font-black text-[10px] px-1.5 py-0.5 rounded">--</span>
                     </div>
 
-                    <!-- ⚡ 實戰智能下單替代防禦指南 (改為永久常駐) -->
+                    <!-- 實戰智能下單替代防禦指南 -->
                     <div id="betting-guide-panel" class="bg-sky-500/10 border border-sky-500/20 p-3 rounded-lg font-mono">
                         <div class="text-sky-400 text-xs font-black flex items-center gap-1 mb-1">⚡ 實戰盤口風控下單指引</div>
                         <div id="betting-guide-text" class="text-white text-[11px] leading-relaxed">--</div>
                     </div>
                     
-                    <div class="relative w-full h-[260px]"><canvas id="historyChart"></canvas></div>
+                    <div class="relative w-full h-[240px]"><canvas id="historyChart"></canvas></div>
                 </div>
             </div>
         </div>
@@ -115,6 +122,7 @@
                 document.getElementById('btn-history').classList.remove('tab-active');
             } else {
                 document.getElementById('live-view').classList.add('hidden');
+                document.getElementById('history-view').classList.add('hidden'); // 預防
                 document.getElementById('history-view').classList.remove('hidden');
                 document.getElementById('btn-live').classList.remove('tab-active');
                 document.getElementById('btn-history').classList.add('tab-active');
@@ -165,33 +173,69 @@
             document.getElementById("selected-matchup").innerText = `${game.away} VS ${game.home}`;
             document.getElementById("selected-time").innerText = `開賽時間: ${game.commence_time.substring(0,16).replace('T',' ')}`;
 
-            // 🧠 核心注入：讓面板常駐，並針對所有訊號（包含 FLAT 平穩）都給予失準防禦指引
             const calibrationText = document.getElementById("calibration-text");
             const calibrationRating = document.getElementById("calibration-rating");
             const guideText = document.getElementById("betting-guide-text");
 
-            const totalSignal = game.signal ? game.signal.total : "FLAT";
-            const currentTotal = game.latest ? game.latest.total : 0;
+            // 💡 獲取下單推薦大看板的元素
+            const verdictPanel = document.getElementById("final-verdict-panel");
+            const verdictTitle = document.getElementById("final-verdict-title");
+            const verdictDesc = document.getElementById("final-verdict-desc");
 
+            const totalSignal = game.signal ? game.signal.total : "FLAT";
+            const mlSignal = game.signal ? game.signal.ml : "FLAT";
+            const currentTotal = game.latest ? game.latest.total : 0;
+            const deltaTotal = game.delta ? game.delta.total : 0;
+            const deltaML = game.delta ? game.delta.ml_home : 0;
+
+            // 🧠 大數據結論邏輯判定（暴力輸出最明顯的最終結果）
             if (totalSignal === "STEAM_OVER") {
+                // 1. 大資金灌注大分
+                verdictPanel.className = "p-4 rounded-xl border border-rose-500 bg-rose-500/10 flex flex-col gap-1.5 font-sans shadow-lg animate-pulse";
+                verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-rose-400";
+                verdictTitle.innerHTML = `🔥 最終推薦：搶進 【 大 分 】`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 美金大資金盤口單邊強力突破（幅度達到 ${deltaTotal}），歷史回測勝率高。建議立即下注，若怕卡死終盤，請搭配替代盤口買進降階的 <b>「${currentTotal - 0.5} 大」</b> 更加穩當！`;
+
                 calibrationText.innerText = "當前觸發【STEAM_OVER (大資金砸大分)】特徵 -> 歷史統計大分精準率: 62.5%";
                 calibrationRating.innerText = "優質提款特徵";
                 calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-                
-                guideText.innerHTML = `市場核心資金正在瘋狂灌注大分！目前終盤基準線已頂高至 <b>${currentTotal}</b> 分。<br>👉 ...<b>實戰防禦校正：</b> 前一日回測顯示大資金追高存在卡死風險，請利用替代盤口降階選擇 <b>「${currentTotal - 1} 大」</b> 或 <b>「${currentTotal - 0.5} 大」</b> 進行安全對沖。`;
+                guideText.innerHTML = `市場核心資金正在瘋狂灌注大分！目前終盤基準線已頂高至 <b>${currentTotal}</b> 分。建議尋找替代低位盤口切入。`;
+
             } else if (totalSignal === "STEAM_UNDER") {
+                // 2. 大資金灌注小分
+                verdictPanel.className = "p-4 rounded-xl border border-sky-500 bg-sky-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
+                verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-sky-400";
+                verdictTitle.innerHTML = `❄️ 最終推薦：搶進 【 小 分 】`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 資金正在瘋狂拋售總分數（幅度達到 ${deltaTotal}）。但注意前日有砸小開大的莊家誘盤盲區，下單時千萬不要貪高，請無腦使用替代盤口加防，直接鎖定 <b>「${currentTotal + 0.5} 小」</b> 完美封鎖防守空間。`;
+
                 calibrationText.innerText = "當前觸發【STEAM_UNDER (大資金砸小分)】特徵 -> 歷史統計此盲區容易失準走水";
                 calibrationRating.innerText = "失準避險警告";
                 calibrationRating.className = "bg-rose-500 text-white font-black text-[10px] px-1.5 py-0.5 rounded animate-pulse";
-                
-                guideText.innerHTML = `大資金正在瘋狂拋售總分。<b>【注意歷史校正】</b>：前一日此類別盲區顯示極易卡死在終盤整數線上（砸大開小、砸小開大等誘盤波動）。<br>👉 <b>實戰避險指引：</b> 建議逆向操作，使用替代盤口加防，拉高安全邊際至 <b>「${currentTotal + 0.5} 小」</b> 或是直接避開此類盤口。`;
+                guideText.innerHTML = `大資金正在瘋狂砸向低分區。昨日盲區顯示容易整數卡死，請用替代盤口升階防守。`;
+
+            } else if (deltaML <= -15) {
+                // 3. 獨贏資金瘋狂灌注主隊 (american盤口中，負值越大、數字減越多代表主隊賠率被大資金買爆)
+                verdictPanel.className = "p-4 rounded-xl border border-amber-500 bg-amber-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
+                verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-amber-400";
+                verdictTitle.innerHTML = `🏠 最終推薦：獨贏進場 【 主 隊 贏 】`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 大小分資金無動靜，但美金核心獨贏資金出現異常偏向，主隊賠率大幅下壓達 ${deltaML} 點。莊家已開始封鎖風險，實戰推薦直接下注主隊獨贏（Moneyline）或主隊受讓！`;
+
+                calibrationText.innerText = "當前觸發【獨贏資金傾斜】特徵 -> 市場大資金單邊湧入主隊";
+                calibrationRating.innerText = "獨贏看好";
+                calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
+                guideText.innerHTML = `獨贏盤口變動劇烈，主隊勝率在量化模型中被市場資金重新修正提高，適合直接進場主隊獨贏。`;
+
             } else {
-                // 💡 當盤口平穩（如當前的 Padres）時，永久秀出前一天的核心警示回饋！
+                // 4. 無顯著訊號或平穩狀態 (例如截圖中的 Padres 這一場)
+                verdictPanel.className = "p-4 rounded-xl border border-gray-700 bg-gray-800/20 flex flex-col gap-1.5 font-sans shadow-lg";
+                verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-gray-400";
+                verdictTitle.innerHTML = `💤 最終推薦：【 空 倉 觀 望 】`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 目前大小分變動為 ${deltaTotal}，主隊獨贏變動僅 ${deltaML}。盤口處於死水狀態，昨日復盤顯示此種停滯最容易落入莊家的誘盤盲區。<b>此時不建議買任何大小分或主隊贏！</b> 請耐心等待開賽前 30 分鐘大資金砸盤突破 $\ge 0.5$ 再行動！`;
+
                 calibrationText.innerText = "當前處於【FLAT (盤口平穩)】狀態 -> 前一日統計顯示市場莊家正進行深層平衡誘盤";
                 calibrationRating.innerText = "前日失準校正中";
                 calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-                
-                guideText.innerHTML = `<b>【昨日盲區復盤校正】</b>：昨天回測發現「資金砸大分、最終卻開小分」的假突破場次特別多！當盤口呈現停滯或微幅震盪時，往往是莊家最危險的獵殺盲區。<br>👉 <b>今日實戰指南：</b> 盤口未動時千萬不要盲目看好初盤大小，請務必等到開賽前 30 分鐘，若有單邊 Delta 突破 $\ge 0.5$ 再跟進；否則一律使用替代盤口做 <b>「+0.5 / -0.5 的降階防禦」</b> 以免被咬死！`;
+                guideText.innerHTML = `昨日回測發現盤口未動時盲目切入最容易被咬死。今日實戰指南：無突破前一律按兵不動，保全資金。`;
             }
 
             const labels = game.history.map(h => h.ts.substring(11,16));
