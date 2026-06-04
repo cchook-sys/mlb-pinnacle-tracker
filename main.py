@@ -1,5 +1,5 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (48小時擴展 + 定時自動爬蟲版)
+MLB Pinnacle 數據量化監控後端完全體 (48小時擴展 + 定時自動爬蟲穩定版)
 - 自動核心：每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口
 - 數據大腦：自動清洗並在 MongoDB 建立歷史波動快照 (Snapshots)
 - API 輸出：提供前端 48 小時內所有即時看盤卡片與昨日歷史結算數據
@@ -81,9 +81,13 @@ def fetch_pinnacle_job():
             
             for ev_odds in odds_data["leagues"][0].get("events", []):
                 event_id = ev_odds["id"]
-                if event_id Ram := fix_map.get(event_id):
-                    # 排除已經開賽的現場滾球盤，我們專注監控賽前大資金
-                    if Ram["commence_time"] <= ts_str:
+                
+                # 💡 核心修復：徹底移除了干擾語法的贅字 Ram
+                if event_id in fix_map:
+                    event_info = fix_map[event_id]
+                    
+                    # 排除已經開賽的現場滾球盤，我們專專注監控賽前大資金
+                    if event_info["commence_time"] <= ts_str:
                         continue
                         
                     # 備份原始快照到雲端
@@ -96,11 +100,11 @@ def fetch_pinnacle_job():
                     
                     # 提取大小分門檻 (Totals)
                     totals = full_game.get("totals", [])
-                    latest_total = totals[0]["points"] if totals else null
+                    latest_total = totals[0]["points"] if totals else None
                     
                     # 提取主隊獨贏賠率 (Moneyline Home)
                     moneyline = full_game.get("moneyline", {})
-                    latest_ml_home = moneyline.get("home") if moneyline else null
+                    latest_ml_home = moneyline.get("home") if moneyline else None
                     
                     # 檢查資料庫是否已經存在這場比賽紀錄
                     existing = games_col.find_one({"game_id": str(event_id)})
@@ -109,9 +113,9 @@ def fetch_pinnacle_job():
                         # 🌟 第一次偵測到該賽事：記錄為初盤 (Opening Lines)
                         new_game = {
                             "game_id": str(event_id),
-                            "commence_time": Ram["commence_time"],
-                            "away": Ram["away"],
-                            "home": Ram["home"],
+                            "commence_time": event_info["commence_time"],
+                            "away": event_info["away"],
+                            "home": event_info["home"],
                             "open": {"total": latest_total, "ml_home": latest_ml_home},
                             "latest": {"total": latest_total, "ml_home": latest_ml_home},
                             "delta": {"total": 0, "ml_home": 0},
@@ -135,8 +139,8 @@ def fetch_pinnacle_job():
                         open_t = existing["open"]["total"]
                         open_ml = existing["open"]["ml_home"]
                         
-                        delta_t = (latest_total - open_t) if (latest_total and open_t) else 0
-                        delta_ml = (latest_ml_home - open_ml) if (latest_ml_home and open_ml) else 0
+                        delta_t = (latest_total - open_t) if (latest_total is not None and open_t is not None) else 0
+                        delta_ml = (latest_ml_home - open_ml) if (latest_ml_home is not None and open_ml is not None) else 0
                         
                         games_col.update_one(
                             {"game_id": str(event_id)},
@@ -181,21 +185,4 @@ def get_games():
 @app.route('/analytics/dataset', methods=['GET'])
 def get_history_dataset():
     try:
-        dataset = list(results_col.find({}, {"_id": 0}).sort("commence_time", 1))
-        return jsonify(dataset)
-    except Exception as e:
-        return jsonify({"error": f"獲取歷史結算數據失敗: {str(e)}"}), 500
-
-# 6. 健康檢查路由
-@app.route('/', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "healthy",
-        "scheduler": "running",
-        "monitoring_window": "48 Hours",
-        "pinnacle_target": "MLB League 3"
-    })
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+        dataset = list(results
