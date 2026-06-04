@@ -1,8 +1,8 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (時區字串精準對齊版)
-- 終極修正：將 Python 的 isoformat 格式精準校正為資料庫相容的 UTC 'Z' 格式，解決賽事撈出空陣列問題
-- 自動核心：每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口
-- API 輸出：完美解鎖未來 48 小時範圍，明天 9 場賽事順利歸位
+MLB Pinnacle 數據量化監控後端完全體 (全域連線池穩定版)
+- 錯誤修復：徹底解決路由內重複建立 MongoClient 導致的 Internal Server Error (500)
+- 自動核心：共用穩定全域連線，每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口
+- API 輸出：完美解鎖未來 48 小時範圍，明日 9 場賽事順利歸位
 """
 
 from fastapi import FastAPI
@@ -25,8 +25,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. 連線 MongoDB 雲端資料庫
-MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&maxPoolSize=10&waitQueueTimeoutMS=5000"
+# 1. 🌟 全域連線 MongoDB 雲端資料庫 (只連線一次，所有路由共用)
+MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&maxPoolSize=20&waitQueueTimeoutMS=5000"
 PINNACLE_USER = "WS968551"
 PINNACLE_PASS = "Surf13579$"
 
@@ -36,7 +36,7 @@ try:
     games_col = db["games"]
     snaps_col = db["snapshots"]
     results_col = db["results"]
-    print("🟢 [資料庫] MongoDB 連線成功！")
+    print("🟢 [資料庫] MongoDB 全域連線成功，通道已就緒！")
 except Exception as e:
     print(f"❌ [資料庫] 連線失敗: {e}")
 
@@ -79,7 +79,6 @@ def fetch_pinnacle_job():
                 }
                 
         if "leagues" in odds_data and len(odds_data["leagues"]) > 0:
-            # 統一用不帶微秒的標準 UTC 格式字串
             ts_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
             
             for ev_odds in odds_data["leagues"][0].get("events", []):
@@ -159,15 +158,10 @@ scheduler.add_job(
 )
 scheduler.start()
 
-# 4. 路由：網頁獲取即時看盤賽事列表 (💡 修正時間格式比對線)
+# 4. 路由：網頁獲取即時看盤賽事列表 (💡 修正：共用全域安全連線)
 @app.get('/games')
 def get_games():
     try:
-        client_fresh = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-        db_fresh = client_fresh["mlb_tracker"]
-        games_col_fresh = db_fresh["games"]
-        
-        # 💡 將 now 與 cutoff 改用標準資料庫相容字串格式，擊碎格式對不上的黑洞
         now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
         cutoff_str = (datetime.utcnow() + timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
         
@@ -177,8 +171,8 @@ def get_games():
                 "$lte": cutoff_str
             }
         }
-        games = list(games_col_fresh.find(query, {"_id": 0}).sort("commence_time", 1))
-        client_fresh.close()
+        # 直接使用全域的 games_col，高效率、不卡死
+        games = list(games_col.find(query, {"_id": 0}).sort("commence_time", 1))
         return games
     except Exception as e:
         return {"error": f"獲取即時數據失敗: {str(e)}"}
@@ -187,12 +181,8 @@ def get_games():
 @app.get('/analytics/dataset')
 def get_history_dataset():
     try:
-        client_fresh = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-        db_fresh = client_fresh["mlb_tracker"]
-        results_col_fresh = db_fresh["results"]
-        
-        dataset = list(results_col_fresh.find({}, {"_id": 0}).sort("commence_time", 1))
-        client_fresh.close()
+        # 直接使用全域的 results_col
+        dataset = list(results_col.find({}, {"_id": 0}).sort("commence_time", 1))
         return dataset
     except Exception as e:
         return {"error": f"獲取歷史數據失敗: {str(e)}"}
@@ -202,6 +192,6 @@ def get_history_dataset():
 def health_check():
     return {
         "status": "healthy",
-        "framework": "FastAPI (Time-String Aligned)",
+        "framework": "FastAPI (Global Pool Fixed)",
         "monitoring_window": "48 Hours"
     }
