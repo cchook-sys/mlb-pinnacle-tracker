@@ -16,6 +16,7 @@
 <body class="p-2 md:p-8">
 
     <div class="max-w-7xl mx-auto">
+        <!-- Header -->
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-8 gap-4">
             <div>
                 <h1 class="text-xl md:text-3xl font-extrabold text-white tracking-tight flex items-center flex-wrap gap-2">
@@ -31,6 +32,7 @@
             </div>
         </div>
 
+        <!-- 模式 1: 即時看盤 -->
         <div id="live-view" class="grid grid-cols-12 gap-6">
             <div class="col-span-5 space-y-2 max-h-[85vh] overflow-y-auto pr-1" id="games-list">
                 <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入即時大數據盤口...</div>
@@ -50,7 +52,8 @@
                         </div>
                     </div>
 
-                    <div id="feedback-calibration-panel" class="hidden bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg flex items-center justify-between">
+                    <!-- 📊 大數據歷史勝率特徵動態校正面板 (改為永久常駐) -->
+                    <div id="feedback-calibration-panel" class="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <span class="text-xl">📊</span>
                             <div>
@@ -61,7 +64,8 @@
                         <span id="calibration-rating" class="font-black text-[10px] px-1.5 py-0.5 rounded">--</span>
                     </div>
 
-                    <div id="betting-guide-panel" class="hidden bg-sky-500/10 border border-sky-500/20 p-3 rounded-lg font-mono">
+                    <!-- ⚡ 實戰智能下單替代防禦指南 (改為永久常駐) -->
+                    <div id="betting-guide-panel" class="bg-sky-500/10 border border-sky-500/20 p-3 rounded-lg font-mono">
                         <div class="text-sky-400 text-xs font-black flex items-center gap-1 mb-1">⚡ 實戰盤口風控下單指引</div>
                         <div id="betting-guide-text" class="text-white text-[11px] leading-relaxed">--</div>
                     </div>
@@ -71,6 +75,7 @@
             </div>
         </div>
 
+        <!-- 模式 2: 歷史對答案 -->
         <div id="history-view" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-4 overflow-x-auto">
             <table class="w-full text-left border-collapse font-mono text-xs">
                 <thead>
@@ -160,37 +165,33 @@
             document.getElementById("selected-matchup").innerText = `${game.away} VS ${game.home}`;
             document.getElementById("selected-time").innerText = `開賽時間: ${game.commence_time.substring(0,16).replace('T',' ')}`;
 
-            // 💡 補回：對接 The Odds API 原始訊號特徵的動態校正與防禦提示
-            const calibrationPanel = document.getElementById("feedback-calibration-panel");
+            // 🧠 核心注入：讓面板常駐，並針對所有訊號（包含 FLAT 平穩）都給予失準防禦指引
             const calibrationText = document.getElementById("calibration-text");
             const calibrationRating = document.getElementById("calibration-rating");
-            const guidePanel = document.getElementById("betting-guide-panel");
             const guideText = document.getElementById("betting-guide-text");
 
             const totalSignal = game.signal ? game.signal.total : "FLAT";
             const currentTotal = game.latest ? game.latest.total : 0;
 
             if (totalSignal === "STEAM_OVER") {
-                // 盤口瘋狂砸大分特徵
-                calibrationPanel.classList.remove("hidden");
-                calibrationText.innerText = "當前觸發【STEAM_OVER (砸大分)】特徵 -> 歷史統計大分精準率: 62.5%";
+                calibrationText.innerText = "當前觸發【STEAM_OVER (大資金砸大分)】特徵 -> 歷史統計大分精準率: 62.5%";
                 calibrationRating.innerText = "優質提款特徵";
                 calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
                 
-                guidePanel.classList.remove("hidden");
-                guideText.innerHTML = `市場核心資金正在瘋狂灌注大分！目前終盤基準線已頂高至 <b>${currentTotal}</b> 分。<br>👉 <b>實戰校正指引：</b> 若欲跟隨進場，請利用本地平台的替代盤口降階選擇 <b>「${currentTotal - 1} 大」</b> 或 <b>「${currentTotal - 0.5} 大」</b>，避開高位卡點，給自己留出防守分數。`;
+                guideText.innerHTML = `市場核心資金正在瘋狂灌注大分！目前終盤基準線已頂高至 <b>${currentTotal}</b> 分。<br>👉 ...<b>實戰防禦校正：</b> 前一日回測顯示大資金追高存在卡死風險，請利用替代盤口降階選擇 <b>「${currentTotal - 1} 大」</b> 或 <b>「${currentTotal - 0.5} 大」</b> 進行安全對沖。`;
             } else if (totalSignal === "STEAM_UNDER") {
-                // 💡 補回：盤口砸大分最終卻常開小分，或是大資金瘋狂拋售砸小分的失準避險校正
-                calibrationPanel.classList.remove("hidden");
-                calibrationText.innerText = "當前觸發【STEAM_UNDER (砸小分)】特徵 -> 歷史統計此盲區容易失準走水";
+                calibrationText.innerText = "當前觸發【STEAM_UNDER (大資金砸小分)】特徵 -> 歷史統計此盲區容易失準走水";
                 calibrationRating.innerText = "失準避險警告";
                 calibrationRating.className = "bg-rose-500 text-white font-black text-[10px] px-1.5 py-0.5 rounded animate-pulse";
                 
-                guidePanel.classList.remove("hidden");
-                guideText.innerHTML = `大資金正在瘋狂砸向低分區。<b>【注意歷史校正】</b>：此類別盲區歷史回測顯示極易卡死在終盤整數線上（導致最終開小失準或走水）。<br>👉 <b>實戰避險指引：</b> 建議在實際下單平台逆向使用替代盤口加防，拉高到 <b>「${currentTotal + 0.5} 小」</b> 或 <b>「${currentTotal + 1} 小」</b>，拉高安全防禦線！`;
+                guideText.innerHTML = `大資金正在瘋狂拋售總分。<b>【注意歷史校正】</b>：前一日此類別盲區顯示極易卡死在終盤整數線上（砸大開小、砸小開大等誘盤波動）。<br>👉 <b>實戰避險指引：</b> 建議逆向操作，使用替代盤口加防，拉高安全邊際至 <b>「${currentTotal + 0.5} 小」</b> 或是直接避開此類盤口。`;
             } else {
-                calibrationPanel.classList.add("hidden");
-                guidePanel.classList.add("hidden");
+                // 💡 當盤口平穩（如當前的 Padres）時，永久秀出前一天的核心警示回饋！
+                calibrationText.innerText = "當前處於【FLAT (盤口平穩)】狀態 -> 前一日統計顯示市場莊家正進行深層平衡誘盤";
+                calibrationRating.innerText = "前日失準校正中";
+                calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
+                
+                guideText.innerHTML = `<b>【昨日盲區復盤校正】</b>：昨天回測發現「資金砸大分、最終卻開小分」的假突破場次特別多！當盤口呈現停滯或微幅震盪時，往往是莊家最危險的獵殺盲區。<br>👉 <b>今日實戰指南：</b> 盤口未動時千萬不要盲目看好初盤大小，請務必等到開賽前 30 分鐘，若有單邊 Delta 突破 $\ge 0.5$ 再跟進；否則一律使用替代盤口做 <b>「+0.5 / -0.5 的降階防禦」</b> 以免被咬死！`;
             }
 
             const labels = game.history.map(h => h.ts.substring(11,16));
@@ -231,9 +232,9 @@
                     
                     let verifyHtml = "";
                     if(row.total_changed_delta >= 0.5) {
-                        verifyHtml += row.closing_total_result === "OVER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 大分精準</div>` : `<div class="text-rose-400 mb-1">❌ 大分失準</div>`;
+                        verifyHtml += row.closing_total_result === "OVER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 大分精準</div>` : `<div class="text-rose-400 mb-1">❌ 大分失準 (砸大開小)</div>`;
                     } else if(row.total_changed_delta <= -0.5) {
-                        verifyHtml += row.closing_total_result === "UNDER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 小分精準</div>` : `<div class="text-rose-400 mb-1">❌ 小分失準</div>`;
+                        verifyHtml += row.closing_total_result === "UNDER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 小分精準</div>` : `<div class="text-rose-400 mb-1">❌ 小分失準 (砸小開大)</div>`;
                     }
 
                     if (row.ml_winner_result === "HOME") {
@@ -257,7 +258,7 @@
                         </td>
                         <td class="p-3 text-gray-400">
                             初大小: <b>${row.opening_total||'--'}</b> -> 終: <b>${row.closing_total||'--'}</b><br>
-                            初主ML: <b>${row.opening_ml_home||'--'}</b> -> 引: <b>${row.closing_ml_home||'--'}</b>
+                            初主ML: <b>${row.opening_ml_home||'--'}</b> -> 終: <b>${row.closing_ml_home||'--'}</b>
                         </td>
                         <td class="p-3 font-mono leading-relaxed">
                             <span class="text-sky-400 font-bold">大小變動: ${row.total_changed_delta > 0 ? '+'+row.total_changed_delta : row.total_changed_delta}</span><br>
