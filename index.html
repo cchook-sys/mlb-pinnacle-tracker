@@ -16,7 +16,6 @@
 <body class="p-2 md:p-8">
 
     <div class="max-w-7xl mx-auto">
-        <!-- Header -->
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-8 gap-4">
             <div>
                 <h1 class="text-xl md:text-3xl font-extrabold text-white tracking-tight flex items-center flex-wrap gap-2">
@@ -32,7 +31,6 @@
             </div>
         </div>
 
-        <!-- 模式 1: 即時看盤 -->
         <div id="live-view" class="grid grid-cols-12 gap-6">
             <div class="col-span-5 space-y-2 max-h-[85vh] overflow-y-auto pr-1" id="games-list">
                 <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入即時大數據盤口...</div>
@@ -52,14 +50,12 @@
                         </div>
                     </div>
 
-                    <!-- 💡 終極靈魂功能：一眼秒懂的【實戰最終下單推薦】大看板 -->
                     <div id="final-verdict-panel" class="p-4 rounded-xl border flex flex-col gap-1.5 font-sans shadow-lg">
                         <div class="text-[11px] text-gray-400 font-bold uppercase tracking-wider">🎯 大數據量化・實戰最終下單推薦</div>
                         <div id="final-verdict-title" class="text-xl md:text-2xl font-black tracking-wide">--</div>
                         <div id="final-verdict-desc" class="text-xs text-gray-300 leading-relaxed font-medium mt-0.5">--</div>
                     </div>
 
-                    <!-- 大數據歷史勝率特徵動態校正面板 -->
                     <div id="feedback-calibration-panel" class="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <span class="text-xl">📊</span>
@@ -71,7 +67,6 @@
                         <span id="calibration-rating" class="font-black text-[10px] px-1.5 py-0.5 rounded">--</span>
                     </div>
 
-                    <!-- 實戰智能下單替代防禦指南 -->
                     <div id="betting-guide-panel" class="bg-sky-500/10 border border-sky-500/20 p-3 rounded-lg font-mono">
                         <div class="text-sky-400 text-xs font-black flex items-center gap-1 mb-1">⚡ 實戰盤口風控下單指引</div>
                         <div id="betting-guide-text" class="text-white text-[11px] leading-relaxed">--</div>
@@ -82,7 +77,6 @@
             </div>
         </div>
 
-        <!-- 模式 2: 歷史對答案 -->
         <div id="history-view" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-4 overflow-x-auto">
             <table class="w-full text-left border-collapse font-mono text-xs">
                 <thead>
@@ -104,6 +98,20 @@
         let fetchedGames = [];
         let myChart = null;
 
+        // 💡 智慧標籤生成器：根據變動幅度，秒速判斷卡片狀態
+        function getCompactBadge(game) {
+            const deltaTotal = game.delta ? game.delta.total : 0;
+            const deltaML = game.delta ? game.delta.ml_home : 0;
+
+            if (Math.abs(deltaTotal) >= 0.5 || deltaML <= -15) {
+                return `<span class="bg-rose-500 text-white font-black text-[10px] px-2 py-0.5 rounded shadow animate-pulse">🎯 進場</span>`;
+            }
+            if (Math.abs(deltaTotal) >= 0.25 || Math.abs(deltaML) >= 5) {
+                return `<span class="bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-[10px] px-2 py-0.5 rounded">⚠️ 觀察</span>`;
+            }
+            return `<span class="bg-gray-800 text-gray-500 text-[10px] px-2 py-0.5 rounded">💤 觀望</span>`;
+        }
+
         function updateSystemRefreshTime() {
             const now = new Date();
             const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -122,7 +130,6 @@
                 document.getElementById('btn-history').classList.remove('tab-active');
             } else {
                 document.getElementById('live-view').classList.add('hidden');
-                document.getElementById('history-view').classList.add('hidden'); // 預防
                 document.getElementById('history-view').classList.remove('hidden');
                 document.getElementById('btn-live').classList.remove('tab-active');
                 document.getElementById('btn-history').classList.add('tab-active');
@@ -144,13 +151,18 @@
 
                 fetchedGames.forEach(g => {
                     const card = document.createElement("div");
-                    card.className = "bg-gray-900 border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-gray-700 transition-all";
+                    card.className = "bg-gray-900 border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-gray-700 transition-all flex flex-col justify-between relative";
                     card.onclick = () => selectGame(g.game_id);
                     card.id = `card-${g.game_id}`;
                     card.innerHTML = `
-                        <div class="text-xs text-gray-500 mb-1 font-mono">${g.commence_time.substring(5,16).replace('T',' ')}</div>
-                        <div class="text-sm font-bold text-white">${g.away} VS ${g.home}</div>
-                        <div class="grid grid-cols-2 gap-2 text-xs text-gray-400 mt-2 font-mono">
+                        <div>
+                            <div class="flex justify-between items-center mb-1.5">
+                                <span class="text-xs text-gray-500 font-mono">${g.commence_time.substring(5,16).replace('T',' ')}</span>
+                                ${getCompactBadge(g)}
+                            </div>
+                            <div class="text-sm font-bold text-white">${g.away} VS ${g.home}</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs text-gray-400 mt-2 font-mono border-t border-gray-800/40 pt-2">
                             <div>大小幅度: <span class="text-sky-400 font-bold">${g.delta.total > 0 ? '+'+g.delta.total : g.delta.total}</span></div>
                             <div>主ML幅度: <span class="text-amber-400 font-bold">${g.delta.ml_home > 0 ? '+'+g.delta.ml_home : g.delta.ml_home}</span></div>
                         </div>
@@ -177,20 +189,16 @@
             const calibrationRating = document.getElementById("calibration-rating");
             const guideText = document.getElementById("betting-guide-text");
 
-            // 💡 獲取下單推薦大看板的元素
             const verdictPanel = document.getElementById("final-verdict-panel");
             const verdictTitle = document.getElementById("final-verdict-title");
             const verdictDesc = document.getElementById("final-verdict-desc");
 
             const totalSignal = game.signal ? game.signal.total : "FLAT";
-            const mlSignal = game.signal ? game.signal.ml : "FLAT";
             const currentTotal = game.latest ? game.latest.total : 0;
             const deltaTotal = game.delta ? game.delta.total : 0;
             const deltaML = game.delta ? game.delta.ml_home : 0;
 
-            // 🧠 大數據結論邏輯判定（暴力輸出最明顯的最終結果）
             if (totalSignal === "STEAM_OVER") {
-                // 1. 大資金灌注大分
                 verdictPanel.className = "p-4 rounded-xl border border-rose-500 bg-rose-500/10 flex flex-col gap-1.5 font-sans shadow-lg animate-pulse";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-rose-400";
                 verdictTitle.innerHTML = `🔥 最終推薦：搶進 【 大 分 】`;
@@ -202,7 +210,6 @@
                 guideText.innerHTML = `市場核心資金正在瘋狂灌注大分！目前終盤基準線已頂高至 <b>${currentTotal}</b> 分。建議尋找替代低位盤口切入。`;
 
             } else if (totalSignal === "STEAM_UNDER") {
-                // 2. 大資金灌注小分
                 verdictPanel.className = "p-4 rounded-xl border border-sky-500 bg-sky-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-sky-400";
                 verdictTitle.innerHTML = `❄️ 最終推薦：搶進 【 小 分 】`;
@@ -214,7 +221,6 @@
                 guideText.innerHTML = `大資金正在瘋狂砸向低分區。昨日盲區顯示容易整數卡死，請用替代盤口升階防守。`;
 
             } else if (deltaML <= -15) {
-                // 3. 獨贏資金瘋狂灌注主隊 (american盤口中，負值越大、數字減越多代表主隊賠率被大資金買爆)
                 verdictPanel.className = "p-4 rounded-xl border border-amber-500 bg-amber-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-amber-400";
                 verdictTitle.innerHTML = `🏠 最終推薦：獨贏進場 【 主 隊 贏 】`;
@@ -226,7 +232,6 @@
                 guideText.innerHTML = `獨贏盤口變動劇烈，主隊勝率在量化模型中被市場資金重新修正提高，適合直接進場主隊獨贏。`;
 
             } else {
-                // 4. 無顯著訊號或平穩狀態 (例如截圖中的 Padres 這一場)
                 verdictPanel.className = "p-4 rounded-xl border border-gray-700 bg-gray-800/20 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-gray-400";
                 verdictTitle.innerHTML = `💤 最終推薦：【 空 倉 觀 望 】`;
