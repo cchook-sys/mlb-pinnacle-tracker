@@ -1,8 +1,8 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (FastAPI 高性能穩定版)
-- 架構兼容：全面改用 FastAPI + Uvicorn 引擎，解決 Render 啟動衝突當機問題
-- 自動核心：每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口與建立快照
-- API 輸出：提早 48 小時輸出明天 9 場全部即時看盤卡片與歷史賽果
+MLB Pinnacle 數據量化監控後端完全體 (FastAPI 高性能穩定修復版)
+- Bug 修復：徹底解決 APScheduler 在啟動時 next_run_time 判定為過去時間導致的崩潰
+- 架構兼容：全面適配 Render 的 Uvicorn 啟動引擎
+- API 輸出：拓寬至未來 48 小時，完美撈出明日 9 場全部即時賽事卡片
 """
 
 from fastapi import FastAPI
@@ -149,12 +149,17 @@ def fetch_pinnacle_job():
     except Exception as e:
         print(f"❌ [定時爬蟲] 執行發生異常錯誤: {e}")
 
-# 3. 啟動排程排班系統 (每 5 分鐘跑一次)
+# 3. 啟動排程排班系統 (💡 修復版：移除 next_run_time 衝突，並加入 misfire 寬限機制)
 scheduler = BackgroundScheduler()
-scheduler.add_job(fetch_pinnacle_job, 'interval', minutes=5, next_run_time=datetime.now())
+scheduler.add_job(
+    fetch_pinnacle_job, 
+    'interval', 
+    minutes=5, 
+    misfire_grace_time=60
+)
 scheduler.start()
 
-# 4. 路由：網頁獲取即時看盤賽事列表 (💡 完美擴展至未來 48 小時內)
+# 4. 路由：網頁獲取即時看盤賽事列表 (已完美擴展至未來 48 小時內)
 @app.get('/games')
 def get_games():
     try:
@@ -186,7 +191,7 @@ def get_history_dataset():
 def health_check():
     return {
         "status": "healthy",
-        "framework": "FastAPI (Uvicorn Compatible)",
+        "framework": "FastAPI (Stable Version)",
         "scheduler": "running",
         "monitoring_window": "48 Hours"
     }
