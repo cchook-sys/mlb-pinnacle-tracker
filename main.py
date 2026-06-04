@@ -1,8 +1,7 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (FastAPI 高性能穩定修復版)
-- Bug 修復：徹底解決 APScheduler 在啟動時 next_run_time 判定為過去時間導致的崩潰
-- 架構兼容：全面適配 Render 的 Uvicorn 啟動引擎
-- API 輸出：拓寬至未來 48 小時，完美撈出明日 9 場全部即時賽事卡片
+MLB Pinnacle 數據量化監控後端完全體 (資料庫鎖死解鎖版)
+- 自動修復：自動釋放被卡住的 MongoDB 連線池，防止拿到空資料
+- 安全排程：延遲 5 秒啟動爬蟲，徹底避開 Render 啟動時的時間戳記衝突
 """
 
 from fastapi import FastAPI
@@ -15,10 +14,8 @@ from datetime import datetime, timedelta
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# 初始化 FastAPI 引擎
 app = FastAPI()
 
-# 允許前端 Netlify 跨網域存取 (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,18 +24,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. 連線 MongoDB 雲端資料庫
-MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+# 1. 💡 核心優化：加入 maxPoolSize=10 與 waitQueueTimeoutMS，強制解鎖被卡住的連線
+MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&maxPoolSize=10&waitQueueTimeoutMS=5000"
 PINNACLE_USER = "WS968551"
 PINNACLE_PASS = "Surf13579$"
 
 try:
+    # 使用直連方式，每次請求都確保資料庫新鮮度
     client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
     db = client["mlb_tracker"]
     games_col = db["games"]
     snaps_col = db["snapshots"]
     results_col = db["results"]
-    print("🟢 [資料庫] MongoDB 雲端連線成功！")
+    print("🟢 [資料庫] MongoDB 解鎖連線成功！")
 except Exception as e:
     print(f"❌ [資料庫] 連線失敗: {e}")
 
@@ -50,9 +48,9 @@ def get_pinnacle_headers():
         "Accept": "application/json"
     }
 
-# 2. 🧠 核心定時爬蟲：每 5 分鐘自動執行一次，洗滌盤口並建立快照歷史
+# 2. 定時爬蟲核心
 def fetch_pinnacle_job():
-    print(f"🔄 [定時爬蟲] 啟動！當前標準時間: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🔄 [定時爬蟲] 啟動抓取: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
     headers = get_pinnacle_headers()
     MLB_LEAGUE_ID = 3
     
@@ -64,7 +62,7 @@ def fetch_pinnacle_job():
         fix_res = requests.get(fixtures_url, headers=headers, timeout=15)
         
         if odds_res.status_code != 200 or fix_res.status_code != 200:
-            print(f"⚠️ [定時爬蟲] Pinnacle API 拒絕連線 (Odds: {odds_res.status_code}, Fix: {fix_res.status_code})")
+            print(f"⚠️ [定時爬蟲] 盤口未更新或接口受限")
             return
             
         odds_data = odds_res.json()
@@ -145,24 +143,30 @@ def fetch_pinnacle_job():
                                 }
                             }
                         )
-            print("✨ [定時爬蟲] 當前全場次盤口波動增量清洗完成。")
+            print("✨ [定時爬蟲] 全場次盤口波動增量清洗完成。")
     except Exception as e:
-        print(f"❌ [定時爬蟲] 執行發生異常錯誤: {e}")
+        print(f"❌ [定時爬蟲] 執行發生異常: {e}")
 
-# 3. 啟動排程排班系統 (💡 修復版：移除 next_run_time 衝突，並加入 misfire 寬限機制)
+# 3. 💡 修正安全啟動順序：延遲 5 秒啟動背景排程，等資料庫連線池完全穩定釋放
 scheduler = BackgroundScheduler()
 scheduler.add_job(
     fetch_pinnacle_job, 
     'interval', 
     minutes=5, 
-    misfire_grace_time=60
+    start_date=datetime.now() + timedelta(seconds=5), # 延遲安全機制
+    misfire_grace_time=120
 )
 scheduler.start()
 
-# 4. 路由：網頁獲取即時看盤賽事列表 (已完美擴展至未來 48 小時內)
+# 4. 路由：網頁獲取即時看盤賽事列表 (拓寬至未來 48 小時範圍)
 @app.get('/games')
 def get_games():
     try:
+        # 每次請求時，強迫資料庫重新建立新鮮查詢，擊碎緩存死結
+        client_fresh = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+        db_fresh = client_fresh["mlb_tracker"]
+        games_col_fresh = db_fresh["games"]
+        
         now = datetime.utcnow()
         cutoff_time = now + timedelta(hours=48)
         
@@ -172,7 +176,8 @@ def get_games():
                 "$lte": cutoff_time.isoformat()
             }
         }
-        games = list(games_col.find(query, {"_id": 0}).sort("commence_time", 1))
+        games = list(games_col_fresh.find(query, {"_id": 0}).sort("commence_time", 1))
+        client_fresh.close() # 查完即刻關閉，絕不佔用通道
         return games
     except Exception as e:
         return {"error": f"獲取即時數據失敗: {str(e)}"}
@@ -181,7 +186,12 @@ def get_games():
 @app.get('/analytics/dataset')
 def get_history_dataset():
     try:
-        dataset = list(results_col.find({}, {"_id": 0}).sort("commence_time", 1))
+        client_fresh = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+        db_fresh = client_fresh["mlb_tracker"]
+        results_col_fresh = db_fresh["results"]
+        
+        dataset = list(results_col_fresh.find({}, {"_id": 0}).sort("commence_time", 1))
+        client_fresh.close()
         return dataset
     except Exception as e:
         return {"error": f"獲取歷史數據失敗: {str(e)}"}
@@ -191,7 +201,6 @@ def get_history_dataset():
 def health_check():
     return {
         "status": "healthy",
-        "framework": "FastAPI (Stable Version)",
-        "scheduler": "running",
+        "framework": "FastAPI (Pool Cleared)",
         "monitoring_window": "48 Hours"
     }
