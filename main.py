@@ -1,8 +1,8 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (全域連線池穩定版)
-- 錯誤修復：徹底解決路由內重複建立 MongoClient 導致的 Internal Server Error (500)
-- 自動核心：共用穩定全域連線，每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口
-- API 輸出：完美解鎖未來 48 小時範圍，明日 9 場賽事順利歸位
+MLB Pinnacle 數據量化監控後端完全體 (終極打包無誤版)
+- 測試解封：暫時移除 /games 的未來 48 小時限制，直接吐出資料庫內所有場次，驗證資料對接
+- 全域安全：所有路由共用全域 MongoClient 連線池，徹底根除 Internal Server Error (500)
+- 自動排程：啟動 5 秒後自動執行第一次 Pinnacle 爬蟲，隨後每 5 分鐘自動更新
 """
 
 from fastapi import FastAPI
@@ -17,6 +17,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 app = FastAPI()
 
+# 允許前端 Netlify 跨網域存取 (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,7 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. 🌟 全域連線 MongoDB 雲端資料庫 (只連線一次，所有路由共用)
+# 1. 全域連線 MongoDB 雲端資料庫 (共用連線池，高效率不鎖死)
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&maxPoolSize=20&waitQueueTimeoutMS=5000"
 PINNACLE_USER = "WS968551"
 PINNACLE_PASS = "Surf13579$"
@@ -62,7 +63,7 @@ def fetch_pinnacle_job():
         fix_res = requests.get(fixtures_url, headers=headers, timeout=15)
         
         if odds_res.status_code != 200 or fix_res.status_code != 200:
-            print(f"⚠️ [定時爬蟲] 盤口未更新或接口受限")
+            print(f"⚠️ [定時爬蟲] 盤口未更新或接口受限 (Odds: {odds_res.status_code}, Fix: {fix_res.status_code})")
             return
             
         odds_data = odds_res.json()
@@ -158,21 +159,12 @@ scheduler.add_job(
 )
 scheduler.start()
 
-# 4. 路由：網頁獲取即時看盤賽事列表 (💡 修正：共用全域安全連線)
+# 4. 路由：網頁獲取即時看盤賽事列表 (💡 解封測試版：直接撈取資料庫內所有現有賽事)
 @app.get('/games')
 def get_games():
     try:
-        now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-        cutoff_str = (datetime.utcnow() + timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        
-        query = {
-            "commence_time": {
-                "$gte": now_str,
-                "$lte": cutoff_str
-            }
-        }
-        # 直接使用全域的 games_col，高效率、不卡死
-        games = list(games_col.find(query, {"_id": 0}).sort("commence_time", 1))
+        # 直接倒出所有資料庫內有的賽事，確保不被時區字串格式卡死空陣列
+        games = list(games_col.find({}, {"_id": 0}).sort("commence_time", 1))
         return games
     except Exception as e:
         return {"error": f"獲取即時數據失敗: {str(e)}"}
@@ -181,7 +173,6 @@ def get_games():
 @app.get('/analytics/dataset')
 def get_history_dataset():
     try:
-        # 直接使用全域的 results_col
         dataset = list(results_col.find({}, {"_id": 0}).sort("commence_time", 1))
         return dataset
     except Exception as e:
@@ -192,6 +183,6 @@ def get_history_dataset():
 def health_check():
     return {
         "status": "healthy",
-        "framework": "FastAPI (Global Pool Fixed)",
-        "monitoring_window": "48 Hours"
+        "framework": "FastAPI (Fully Packaged)",
+        "monitoring_window": "All Available Database"
     }
