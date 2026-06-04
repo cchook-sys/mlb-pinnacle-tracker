@@ -1,25 +1,33 @@
 """
-MLB Pinnacle 數據量化監控後端完全體 (48小時擴展 + 定時自動爬蟲穩定版)
-- 自動核心：每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口
-- 數據大腦：自動清洗並在 MongoDB 建立歷史波動快照 (Snapshots)
-- API 輸出：提供前端 48 小時內所有即時看盤卡片與昨日歷史結算數據
+MLB Pinnacle 數據量化監控後端完全體 (FastAPI 高性能穩定版)
+- 架構兼容：全面改用 FastAPI + Uvicorn 引擎，解決 Render 啟動衝突當機問題
+- 自動核心：每 5 分鐘自動連線 Pinnacle API 抓取最新即時盤口與建立快照
+- API 輸出：提早 48 小時輸出明天 9 場全部即時看盤卡片與歷史賽果
 """
 
-from flask import Flask, jsonify
-from flask_cors import CORS
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import pymongo
 import certifi
 import requests
 import base64
 from datetime import datetime, timedelta
 import os
-import time
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = Flask(__name__)
-CORS(app) # 允許前端 Netlify 跨網域存取
+# 初始化 FastAPI 引擎
+app = FastAPI()
 
-# 1. 配置資料庫與 Pinnacle 帳密安全憑證
+# 允許前端 Netlify 跨網域存取 (CORS)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 1. 連線 MongoDB 雲端資料庫
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 PINNACLE_USER = "WS968551"
 PINNACLE_PASS = "Surf13579$"
@@ -27,9 +35,9 @@ PINNACLE_PASS = "Surf13579$"
 try:
     client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
     db = client["mlb_tracker"]
-    games_col = db["games"]       # 儲存即時盤口與波動歷史
-    snaps_col = db["snapshots"]   # 儲存最原始快照備份
-    results_col = db["results"]   # 儲存完賽結算對答案數據
+    games_col = db["games"]
+    snaps_col = db["snapshots"]
+    results_col = db["results"]
     print("🟢 [資料庫] MongoDB 雲端連線成功！")
 except Exception as e:
     print(f"❌ [資料庫] 連線失敗: {e}")
@@ -42,18 +50,16 @@ def get_pinnacle_headers():
         "Accept": "application/json"
     }
 
-# 2. 🧠 核心定時爬蟲：每 5 分鐘自動執行一次，洗滌盤口並寫入資料庫
+# 2. 🧠 核心定時爬蟲：每 5 分鐘自動執行一次，洗滌盤口並建立快照歷史
 def fetch_pinnacle_job():
     print(f"🔄 [定時爬蟲] 啟動！當前標準時間: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
     headers = get_pinnacle_headers()
     MLB_LEAGUE_ID = 3
     
     try:
-        # A. 抓取獨贏盤與大小分盤口賠率 (Straight Odds)
         odds_url = f"https://api.pinnacle.com/v1/odds?sportId=29&leagueIds={MLB_LEAGUE_ID}"
         odds_res = requests.get(odds_url, headers=headers, timeout=15)
         
-        # B. 抓取賽事基本資訊 (開賽時間、隊伍名稱)
         fixtures_url = f"https://api.pinnacle.com/v1/fixtures?sportId=29&leagueIds={MLB_LEAGUE_ID}"
         fix_res = requests.get(fixtures_url, headers=headers, timeout=15)
         
@@ -64,7 +70,6 @@ def fetch_pinnacle_job():
         odds_data = odds_res.json()
         fix_data = fix_res.json()
         
-        # 建立賽事 ID 對應隊伍與時間的字典
         fix_map = {}
         if "league" in fix_data and len(fix_data["league"]) > 0:
             for ev in fix_data["league"][0].get("events", []):
@@ -75,42 +80,33 @@ def fetch_pinnacle_job():
                     "status": ev.get("status")
                 }
                 
-        # 開始洗滌盤口並記錄波動
         if "leagues" in odds_data and len(odds_data["leagues"]) > 0:
-            ts_str = datetime.utcnow().isoformat() # 本次抓取的時間戳記
+            ts_str = datetime.utcnow().isoformat()
             
             for ev_odds in odds_data["leagues"][0].get("events", []):
                 event_id = ev_odds["id"]
                 
-                # 💡 核心修復：徹底移除了干擾語法的贅字 Ram
                 if event_id in fix_map:
                     event_info = fix_map[event_id]
                     
-                    # 排除已經開賽的現場滾球盤，我們專專注監控賽前大資金
                     if event_info["commence_time"] <= ts_str:
                         continue
                         
-                    # 備份原始快照到雲端
                     snaps_col.insert_one({"event_id": event_id, "ts": ts_str, "odds": ev_odds})
                     
-                    # 提取最新盤口核心數值
                     periods = ev_odds.get("periods", [])
                     if not periods: continue
-                    full_game = periods[0] # period 0 代表全場完賽盤口
+                    full_game = periods[0]
                     
-                    # 提取大小分門檻 (Totals)
                     totals = full_game.get("totals", [])
                     latest_total = totals[0]["points"] if totals else None
                     
-                    # 提取主隊獨贏賠率 (Moneyline Home)
                     moneyline = full_game.get("moneyline", {})
                     latest_ml_home = moneyline.get("home") if moneyline else None
                     
-                    # 檢查資料庫是否已經存在這場比賽紀錄
                     existing = games_col.find_one({"game_id": str(event_id)})
                     
                     if not existing:
-                        # 🌟 第一次偵測到該賽事：記錄為初盤 (Opening Lines)
                         new_game = {
                             "game_id": str(event_id),
                             "commence_time": event_info["commence_time"],
@@ -124,18 +120,14 @@ def fetch_pinnacle_job():
                         }
                         games_col.insert_one(new_game)
                     else:
-                        # 🌟 歷史已存在該賽事：檢查盤口是否有發生變動變盤
                         hist = existing.get("history", [])
                         last_h = hist[-1] if hist else {}
                         
-                        # 如果最新抓到的數值跟上次完全一樣，跳過不重複寫入，保持圖表乾淨
                         if latest_total == last_h.get("total") and latest_ml_home == last_h.get("ml_home"):
                             continue
                             
-                        # 若有變盤，將新數據推進歷史波動陣列中
                         hist.append({"ts": ts_str, "total": latest_total, "ml_home": latest_ml_home})
                         
-                        # 計算總波動幅度 (最新盤 - 歷史最一開始的初盤)
                         open_t = existing["open"]["total"]
                         open_ml = existing["open"]["ml_home"]
                         
@@ -157,17 +149,16 @@ def fetch_pinnacle_job():
     except Exception as e:
         print(f"❌ [定時爬蟲] 執行發生異常錯誤: {e}")
 
-# 3. 啟動後台自動排程排班系統 (每 5 分鐘自動抓一次)
+# 3. 啟動排程排班系統 (每 5 分鐘跑一次)
 scheduler = BackgroundScheduler()
 scheduler.add_job(fetch_pinnacle_job, 'interval', minutes=5, next_run_time=datetime.now())
 scheduler.start()
 
-# 4. 路由：網頁獲取即時看盤賽事列表 (💡 已成功拓寬至 48 小時範圍)
-@app.route('/games', methods=['GET'])
+# 4. 路由：網頁獲取即時看盤賽事列表 (💡 完美擴展至未來 48 小時內)
+@app.get('/games')
 def get_games():
     try:
         now = datetime.utcnow()
-        # 成功升級：過濾線拉長到 48 小時，保證明天 9 場賽事順利出盤看得到
         cutoff_time = now + timedelta(hours=48)
         
         query = {
@@ -177,12 +168,25 @@ def get_games():
             }
         }
         games = list(games_col.find(query, {"_id": 0}).sort("commence_time", 1))
-        return jsonify(games)
+        return games
     except Exception as e:
-        return jsonify({"error": f"獲取即時看盤數據失敗: {str(e)}"}), 500
+        return {"error": f"獲取即時數據失敗: {str(e)}"}
 
 # 5. 路由：網頁獲取昨日歷史結算數據
-@app.route('/analytics/dataset', methods=['GET'])
+@app.get('/analytics/dataset')
 def get_history_dataset():
     try:
-        dataset = list(results
+        dataset = list(results_col.find({}, {"_id": 0}).sort("commence_time", 1))
+        return dataset
+    except Exception as e:
+        return {"error": f"獲取歷史數據失敗: {str(e)}"}
+
+# 6. 健康檢查路由
+@app.get('/')
+def health_check():
+    return {
+        "status": "healthy",
+        "framework": "FastAPI (Uvicorn Compatible)",
+        "scheduler": "running",
+        "monitoring_window": "48 Hours"
+    }
