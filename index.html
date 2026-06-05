@@ -98,7 +98,6 @@
         let fetchedGames = [];
         let myChart = null;
 
-        // 💡 智慧標籤生成器：自動在左側卡片生成彩色實戰狀態
         function getCompactBadge(game) {
             const deltaTotal = game.delta ? game.delta.total : 0;
             const deltaML = game.delta ? game.delta.ml_home : 0;
@@ -145,7 +144,7 @@
                 container.innerHTML = "";
 
                 if(!fetchedGames || fetchedGames.length === 0) {
-                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 暫無賽事 (正處於智慧休眠期，或等待下一輪新場次放盤)</div>`;
+                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 暫無賽事 (等待下一輪新場次放盤)</div>`;
                     return;
                 }
 
@@ -171,7 +170,7 @@
                 });
                 updateSystemRefreshTime();
             } catch {
-                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 伺服器正在啟動連線中，請稍候重整</div>`;
+                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 伺服器同步中，請稍候重整</div>`;
             }
         }
 
@@ -276,7 +275,7 @@
                     }
                 });
 
-                // 💡 核心優化：移除原先多餘的 .reverse()，完全順應後端精準降序
+                // 💡 順應後端降序排序，直接讀取
                 dataset.forEach(row => {
                     const isCorePick = (row.game_id === topRecommendedId && maxDelta > 0);
                     
