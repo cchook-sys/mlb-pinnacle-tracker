@@ -28,7 +28,7 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-# ── 經典定時背景快照 (每10分鐘靜默執行，不影響主線) ───────────────────────────
+# ── 經典定時背景任務 (純背景默默記錄，不干擾主線接口) ───────────────────────────
 async def fetch_and_store_job():
     if not ODDS_API_KEY:
         return
@@ -70,7 +70,6 @@ async def fetch_and_store_job():
     except:
         pass
 
-# ── 賽果結算與 48 小時自動沖銷 (已將 || 修正為 Python 標準 or) ──────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -123,7 +122,6 @@ async def fetch_and_settle_results():
                 }
                 results_col.insert_one(result_doc)
 
-            # 48小時滾動自動刪除過期快照
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -151,7 +149,7 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# ── 💡 週二核心復活：現場直通 API，排除資料庫干擾 ──────────────────────────
+# ── 💡 關鍵回歸：與週二完全相同的純現場直出路由 ──────────────────────────────
 @app.get("/games")
 async def get_games():
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
@@ -171,7 +169,6 @@ async def get_games():
                     over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None) if totals else None
                     ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None) if h2h else None
 
-                    # 經典週二直出欄位對齊
                     result_list.append({
                         "game_id":       game["id"],
                         "home":          game["home_team"],
