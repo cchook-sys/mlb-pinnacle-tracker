@@ -4,7 +4,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pymongo
@@ -27,15 +27,6 @@ try:
     print("MongoDB Connected Successfully")
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
-
-def get_est_date_string(utc_str: str) -> str:
-    try:
-        clean_ts = utc_str.replace("Z", "")
-        dt_utc = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
-        dt_est = dt_utc.astimezone(timezone(timedelta(hours=-4)))
-        return dt_est.strftime("%Y-%m-%d")
-    except:
-        return ""
 
 async def fetch_and_store():
     if not ODDS_API_KEY:
@@ -150,10 +141,10 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
+            # 滾動自動清除過期資料 (維持精簡 2 天賽果數據)
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-            print(f"Settle finished. Added {settled_count} rows.")
     except Exception as e:
         print(f"Settle failed: {e}")
 
@@ -167,7 +158,7 @@ async def app_lifespan(app_instance: FastAPI):
     yield
     scheduler.shutdown()
 
-app = FastAPI(title="MLB Pinnacle Tracker EST-Date Edition", lifespan=app_lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker Pure-Live Edition", lifespan=app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -178,22 +169,26 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# ── 💡 路由 1：無腦直出最新大聯盟賽事（包攬今明所有已開盤場次） ─────────────────
 @app.get("/games")
-async def get_games(date: str = Query(None)):
-    if not date:
-        est_now = datetime.now(timezone.utc) - timedelta(hours=4)
-        date = est_now.strftime("%Y-%m-%d")
-
-    all_snaps = list(snaps_col.find({}, {"_id": 0}))
-    games = {}
+async def get_games():
+    await fetch_and_store()
     
+    now = datetime.now(timezone.utc)
+    # 過濾條件：從 6 小時前開始，一路看到未來 36 小時。有盤口就直接抓出來，不需要切換日期！
+    start_filter = (now - timedelta(hours=6)).isoformat()
+    end_filter = (now + timedelta(hours=36)).isoformat()
+    
+    all_snaps = list(snaps_col.find({
+        "commence_time": {"$gte": start_filter, "$lte": end_filter}
+    }, {"_id": 0}))
+
+    games = {}
     for s in all_snaps:
-        g_est_date = get_est_date_string(s.get("commence_time", ""))
-        if g_est_date == date:
-            gid = s["game_id"]
-            if gid not in games:
-                games[gid] = []
-            games[gid].append(s)
+        gid = s["game_id"]
+        if gid not in games:
+            games[gid] = []
+        games[gid].append(s)
 
     result = []
     for gid, snaps in games.items():
