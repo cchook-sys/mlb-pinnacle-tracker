@@ -1,25 +1,35 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-<body class="bg-black text-white p-4 font-sans">
-    <h1 class="text-2xl font-bold mb-4">MLB 數據監控 (現場直出版)</h1>
+<body class="bg-black text-white p-4">
+    <h1 class="text-xl font-bold">MLB 數據監控 (現場直出版)</h1>
     <div id="status" class="text-sm text-gray-400 mb-4">同步時間: --:--:--</div>
-    <div id="games-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+    <div id="games-list" class="grid grid-cols-1 gap-4"></div>
+
     <script>
         async function fetchGames() {
-            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-            const json = await res.json();
-            document.getElementById("status").innerText = "最後同步: " + json.system_updated_at;
-            const list = document.getElementById("games-list");
-            list.innerHTML = "";
-            json.data.forEach(g => {
-                list.innerHTML += `<div class="bg-gray-900 p-4 rounded border border-gray-700">
-                    <div class="font-bold text-lg">${g.away} VS ${g.home}</div>
-                    <div class="text-xs text-gray-500">${g.commence_time}</div>
-                    <div class="mt-2 text-sm text-sky-400">總分盤: ${g.latest.total || '--'} | 獨贏: ${g.latest.ml_home || '--'}</div>
-                </div>`;
-            });
+            try {
+                // 請確認你的 Render 網址完全正確
+                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                const json = await res.json();
+                
+                // 顯示最後更新時間
+                document.getElementById("status").innerText = "最後同步: " + (json.system_updated_at || "未知");
+                
+                const list = document.getElementById("games-list");
+                list.innerHTML = "";
+                
+                // 確保我們讀取的是 json.data
+                const games = json.data || [];
+                games.forEach(g => {
+                    list.innerHTML += `<div class="bg-gray-900 p-3 rounded border border-gray-700">
+                        <div class="font-bold">${g.away_team} VS ${g.home_team}</div>
+                        <div class="text-xs text-gray-500">${g.commence_time}</div>
+                    </div>`;
+                });
+            } catch (e) {
+                document.getElementById("status").innerText = "錯誤: 無法獲取數據";
+            }
         }
-        setInterval(fetchGames, 60000); // 每分鐘自動刷新
         fetchGames();
     </script>
 </body>
