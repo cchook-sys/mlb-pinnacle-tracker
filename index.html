@@ -98,7 +98,7 @@
         let fetchedGames = [];
         let myChart = null;
 
-        // 💡 智慧標籤生成器：根據變動幅度，秒速判斷卡片狀態
+        // 💡 智慧標籤生成器：自動在左側卡片生成彩色實戰狀態
         function getCompactBadge(game) {
             const deltaTotal = game.delta ? game.delta.total : 0;
             const deltaML = game.delta ? game.delta.ml_home : 0;
@@ -224,7 +224,7 @@
                 verdictPanel.className = "p-4 rounded-xl border border-amber-500 bg-amber-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-amber-400";
                 verdictTitle.innerHTML = `🏠 最終推薦：獨贏進場 【 主 隊 贏 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 大小分資金無動靜，但美金核心獨贏資金出現異常偏向，主隊賠率大幅下壓達 ${deltaML} 點。莊家已開始封鎖風險，實戰推薦直接下注主隊獨贏（Moneyline）或主隊受讓！`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 大小分資金無動緊，但美金核心獨贏資金出現異常偏向，主隊賠率大幅下壓達 ${deltaML} 點。莊家已開始封鎖風險，實戰推薦直接下注主隊獨贏（Moneyline）或主隊受讓！`;
 
                 calibrationText.innerText = "當前觸發【獨贏資金傾斜】特徵 -> 市場大資金單邊湧入主隊";
                 calibrationRating.innerText = "獨贏看好";
@@ -276,7 +276,8 @@
                     }
                 });
 
-                dataset.reverse().forEach(row => {
+                // 💡 核心優化：移除原先多餘的 .reverse()，完全順應後端精準降序
+                dataset.forEach(row => {
                     const isCorePick = (row.game_id === topRecommendedId && maxDelta > 0);
                     
                     let verifyHtml = "";
