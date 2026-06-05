@@ -13,8 +13,7 @@ import certifi
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
 BOOKMAKER    = "pinnacle"
-# 💡 智慧解鎖：三大市場全開，只要有任何一項放盤，場次絕對跑不掉
-MARKETS      = "h2h,totals,spreads"
+MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
@@ -29,35 +28,28 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-# ── 經典週二異步造血核心 ──────────────────────────────────────────────────────
-async def fetch_and_store():
+# ── 經典定時背景快照 (每10分鐘靜默執行，不影響主線) ───────────────────────────
+async def fetch_and_store_job():
     if not ODDS_API_KEY:
-        return []
+        return
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
-            if res.status_code != 200:
-                return []
+            if res.status_code != 200: return
             games = res.json()
-            ts    = int(time.time())
-            stored = 0
+            ts = int(time.time())
 
             for game in games:
                 pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
-                if not pin:
-                    continue
+                if not pin: continue
 
-                # 智慧比對三大盤口市場
-                totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
-                h2h     = next((m for m in pin["markets"] if m["key"] == "h2h"),     None)
-                spreads = next((m for m in pin["markets"] if m["key"] == "spreads"), None)
+                totals = next((m for m in pin["markets"] if m["key"] == "totals"), None)
+                h2h    = next((m for m in pin["markets"] if m["key"] == "h2h"), None)
 
                 over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None)
                 ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
-                sp_home = next((o for o in (spreads or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
 
-                # 💡 安全相容機制：只要有讓分盤、獨贏盤、大小盤任何一項有資料，就無條件寫入
                 snap = {
                     "game_id":      game["id"],
                     "home":         game["home_team"],
@@ -65,24 +57,20 @@ async def fetch_and_store():
                     "commence_time": game["commence_time"],
                     "ts":           ts,
                     "ts_iso":       datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
-                    "total":        over["point"] if over else (sp_home["point"] if sp_home else None),
+                    "total":        over["point"] if over else None,
                     "over_juice":   over["price"] if over else None,
-                    "ml_home":      ml_home["price"] if ml_home else (sp_home["price"] if sp_home else None),
+                    "ml_home":      ml_home["price"] if ml_home else None,
                 }
-
+                
                 last_snap = snaps_col.find_one({"game_id": game["id"]}, sort=[("ts", pymongo.DESCENDING)])
                 has_changed = not last_snap or last_snap.get("total") != snap["total"] or last_snap.get("ml_home") != snap["ml_home"]
-
+                
                 if has_changed or (last_snap and (ts - last_snap["ts"]) >= 7200):
                     snaps_col.insert_one(snap)
-                    stored += 1
-            print(f"Fetch completed. Stored {stored} snapshots.")
-            return games
-    except Exception as e:
-        print(f"Fetch failed: {e}")
-        return []
+    except:
+        pass
 
-# ── 歷史賽果沖銷 ──────────────────────────────────────────────────────────────
+# ── 賽果結算與 48 小時自動沖銷 ────────────────────────────────────────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -90,31 +78,24 @@ async def fetch_and_settle_results():
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
-            if res.status_code != 200:
-                return
+            if res.status_code != 200: return
             completed_games = res.json()
-            settled_count = 0
 
             for game in completed_games:
-                if not game.get("completed", False):
-                    continue
+                if not game.get("completed", False): continue
                 gid = game["id"]
-                if results_col.find_one({"game_id": gid}):
-                    continue
+                if results_col.find_one({"game_id": gid}): continue
 
                 scores = game.get("scores", [])
-                if not scores or len(scores) < 2:
-                    continue
+                if not scores || len(scores) < 2: continue
 
                 home_score = next((int(s["score"]) for s in scores if s["name"] == game["home_team"]), None)
                 away_score = next((int(s["score"]) for s in scores if s["name"] == game["away_team"]), None)
-                if home_score is None or away_score is None:
-                    continue
+                if home_score is None || away_score is None: continue
                 
                 total_outcome_score = home_score + away_score
                 snaps = list(snaps_col.find({"game_id": gid}, {"_id": 0}).sort("ts", pymongo.ASCENDING))
-                if not snaps:
-                    continue
+                if not snaps: continue
 
                 first_snap = snaps[0]
                 last_snap  = snaps[-1]
@@ -133,44 +114,33 @@ async def fetch_and_settle_results():
                     elif total_outcome_score < closing_total: closing_total_result = "UNDER"
 
                 result_doc = {
-                    "game_id": gid,
-                    "home": game["home_team"],
-                    "away": game["away_team"],
-                    "commence_time": game["commence_time"],
-                    "home_score": home_score,
-                    "away_score": away_score,
-                    "total_score": total_outcome_score,
-                    "ml_winner": ml_winner,                
-                    "opening_total": opening_total,         
-                    "opening_total_result": opening_total_result, 
-                    "closing_total": closing_total,          
-                    "closing_total_result": closing_total_result, 
-                    "opening_ml_home": first_snap.get("ml_home"),
-                    "closing_ml_home": last_snap.get("ml_home"),
+                    "game_id": gid, "home": game["home_team"], "away": game["away_team"], "commence_time": game["commence_time"],
+                    "home_score": home_score, "away_score": away_score, "total_score": total_outcome_score, "ml_winner": ml_winner,                
+                    "opening_total": opening_total, "opening_total_result": opening_total_result, 
+                    "closing_total": closing_total, "closing_total_result": closing_total_result, 
+                    "opening_ml_home": first_snap.get("ml_home"), "closing_ml_home": last_snap.get("ml_home"),
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }
                 results_col.insert_one(result_doc)
-                settled_count += 1
 
-            # 48小時滾動自動刪除過期資料參考，避免爆艙
+            # 48小時滾動自動刪除過期快照
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-    except Exception as e:
-        print(f"Settle failed: {e}")
+    except:
+        pass
 
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def app_lifespan(app_instance: FastAPI):
-    await fetch_and_store()
-    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
+    scheduler.add_job(fetch_and_store_job, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
     yield
     scheduler.shutdown()
 
-app = FastAPI(title="MLB Pinnacle Tracker Pure-Live Edition", lifespan=app_lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker Tuesday Golden Edition", lifespan=app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -181,60 +151,57 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# ── 💡 週二核心復活：完全不讀資料庫，現場呼叫 API，直接原汁原味吐出 ──────────
 @app.get("/games")
 async def get_games():
-    # 點擊網頁時強制直連造血一次
-    await fetch_and_store()
-    
-    now = datetime.now(timezone.utc)
-    # 放寬快照過濾窗（從當前起算到未來 48 小時），保證今明後天所有開盤場次完全收錄
-    start_filter = (now - timedelta(hours=12)).isoformat()
-    end_filter = (now + timedelta(hours=48)).isoformat()
-    
-    all_snaps = list(snaps_col.find({
-        "commence_time": {"$gte": start_filter, "$lte": end_filter}
-    }, {"_id": 0}))
-
-    games = {}
-    for s in all_snaps:
-        gid = s["game_id"]
-        if gid not in games:
-            games[gid] = []
-        games[gid].append(s)
-
+    url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
     result_list = []
-    for gid, snaps in games.items():
-        snaps_sorted = sorted(snaps, key=lambda x: x["ts"])
-        latest = snaps_sorted[-1]
-        first  = snaps_sorted[0]
-
-        total_delta = round(float(latest.get("total", 0)) - float(first.get("total", 0)), 2) if (latest.get("total") is not None and first.get("total") is not None) else 0
-        ml_home_delta = int(latest.get("ml_home", 0)) - int(first.get("ml_home", 0)) if (latest.get("ml_home") is not None and first.get("ml_home") is not None) else 0
-
-        result_list.append({
-            "game_id":       gid,
-            "home":          latest["home"],
-            "away":          latest["away"],
-            "commence_time": latest["commence_time"],
-            "snapshot_count": len(snaps_sorted),
-            "first_snap_ts": first.get("ts_iso"),
-            "latest": {"ts": latest.get("ts_iso"), "total": latest.get("total"), "ml_home": latest.get("ml_home")},
-            "open": {"total": first.get("total"), "ml_home": first.get("ml_home")},
-            "delta": {"total": total_delta, "ml_home": ml_home_delta},
-            "signal": {
-                "total": "STEAM_OVER" if total_delta >= 0.5 else ("STEAM_UNDER" if total_delta <= -0.5 else "FLAT"),
-                "ml":    "STEAM_HOME" if ml_home_delta <= -15 else ("STEAM_AWAY" if ml_home_delta >= 15 else "FLAT"),
-            },
-            "history": [{"ts": s.get("ts_iso"), "total": s.get("total"), "ml_home": s.get("ml_home")} for s in snaps_sorted],
-        })
-
-    result_list.sort(key=lambda x: x["commence_time"])
     
+    try:
+        async with httpx.AsyncClient(timeout=15) as async_client:
+            res = await async_client.get(url)
+            if res.status_code == 200:
+                games = res.json()
+                for game in games:
+                    pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
+                    
+                    # 經典格式現場解析
+                    totals = next((m for m in pin["markets"] if m["key"] == "totals"), None) if pin else None
+                    h2h    = next((m for m in pin["markets"] if m["key"] == "h2h"), None) if pin else None
+
+                    over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None)
+                    ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
+
+                    # 經典週二 Delta 計算 (若無歷史就先呈現 0，保障卡片 100% 現形)
+                    result_list.append({
+                        "game_id":       game["id"],
+                        "home":          game["home_team"],
+                        "away":          game["away_team"],
+                        "commence_time": game["commence_time"],
+                        "latest": {
+                            "total":   over["point"] if over else null,
+                            "ml_home": ml_home["price"] if ml_home else null,
+                        },
+                        "open": {
+                            "total":   over["point"] if over else null,
+                            "ml_home": ml_home["price"] if ml_home else null,
+                        },
+                        "delta": {
+                            "total":   0,
+                            "ml_home": 0,
+                        },
+                        "signal": {
+                            "total": "FLAT",
+                            "ml":    "FLAT",
+                        },
+                        "history": []
+                    })
+    except Exception as e:
+        print(f"API Live route failed: {e}")
+
     tw_now = datetime.now(timezone(timedelta(hours=8)))
-    timestamp_str = tw_now.strftime("%m/%d %H:%M:%S")
-    
     return {
-        "system_updated_at": timestamp_str,
+        "system_updated_at": tw_now.strftime("%m/%d %H:%M:%S"),
         "data": result_list
     }
 
