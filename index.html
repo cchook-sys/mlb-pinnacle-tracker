@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板 - 美東日期完全體</title>
+    <title>MLB Pinnacle 數據量化儀表板 - 雙時區完全體</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -23,9 +23,9 @@
                 </h1>
             </div>
             
-            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end flex-wrap">
                 <div class="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg shadow-inner">
-                    <span class="text-xs text-amber-400 font-black">📅 美東日期:</span>
+                    <span class="text-xs text-amber-400 font-black">📅 盤口美東日期:</span>
                     <input type="date" id="est-date-picker" onchange="loadDashboard()" class="bg-transparent text-white text-sm font-bold font-mono focus:outline-none cursor-pointer">
                 </div>
                 <div class="flex gap-2">
@@ -50,7 +50,10 @@
                     <div class="flex justify-between items-center border-b border-gray-800 pb-2">
                         <div>
                             <h2 id="selected-matchup" class="text-lg font-bold text-white leading-tight">--- VS ---</h2>
-                            <p id="selected-time" class="text-xs text-gray-400 mt-1">開賽時間: --</p>
+                            <div id="selected-time-panel" class="text-xs text-gray-400 mt-1 space-y-0.5 font-mono">
+                                <p id="selected-time-est">🇺🇸 美東開賽: --</p>
+                                <p id="selected-time-tw" class="text-sky-400 font-bold">🇹🇼 台灣時間: --</p>
+                            </div>
                         </div>
                     </div>
 
@@ -85,11 +88,11 @@
             <table class="w-full text-left border-collapse font-mono text-xs">
                 <thead>
                     <tr class="border-b border-gray-800 text-gray-400">
-                        <th class="p-3">對戰組合</th>
-                        <th class="p-3">初盤 -> 終盤 (大小/主ML)</th>
+                        <th class="p-3">對戰組合 / 雙時區時間</th>
+                        <th class="p-3">初盤 -> 終盤 (大小)</th>
                         <th class="p-3">資金流向 (Delta)</th>
                         <th class="p-3">完賽比分</th>
-                        <th class="p-3 text-sky-400">📊 預測校正驗證 (包含獨贏)</th>
+                        <th class="p-3 text-sky-400">📊 預測校正驗證</th>
                     </tr>
                 </thead>
                 <tbody id="history-table-body"></tbody>
@@ -102,9 +105,22 @@
         let fetchedGames = [];
         let myChart = null;
 
-        // 💡 自動同步初始化：直接把選擇器預設對齊當前的美東日期
+        // 💡 核心工具：雙時區格式轉換器
+        function formatDualTime(utcStr) {
+            try {
+                const dateObj = new Date(utcStr);
+                // 台灣本地時間
+                const twTime = dateObj.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+                // 美東夏令時間 (UTC-4)
+                const estTime = new Date(dateObj.getTime() - (4 * 60 * 60 * 1000)).toISOString().substring(11, 16);
+                return { est: `${estTime} ET`, tw: `${twTime} (台)` };
+            } catch {
+                return { est: '--:-- ET', tw: '--/-- --:--' };
+            }
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
-            const estTime = new Date(new Date().getTime() - (5 * 60 * 60 * 1000));
+            const estTime = new Date(new Date().getTime() - (4 * 60 * 60 * 1000));
             document.getElementById('est-date-picker').value = estTime.toISOString().split('T')[0];
             loadDashboard();
         });
@@ -146,25 +162,29 @@
                             <span class="text-3xl block mb-2">📭</span>
                             <div class="text-white text-sm font-bold mb-1">該美東日期暫無即時監控數據</div>
                             <div class="text-gray-500 text-xs leading-relaxed">
-                                大聯盟當日賽事尚未開盤，或莊家正在調整賠率。<br>
-                                👉 請切換上方日期至<b>明天或後天</b>查看最新放盤場次！
+                                大聯盟此日期尚未開盤，或已過期滾動沖銷。<br>
+                                👉 請切換上方日期至<b>其他美東日期</b>查看盤口場次！
                             </div>
                         </div>`;
                     return;
                 }
 
                 fetchedGames.forEach(g => {
+                    const times = formatDualTime(g.commence_time);
                     const card = document.createElement("div");
                     card.className = "bg-gray-900 border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-gray-700 transition-all flex flex-col justify-between relative";
                     card.onclick = () => selectGame(g.game_id);
                     card.id = `card-${g.game_id}`;
                     card.innerHTML = `
                         <div>
-                            <div class="flex justify-between items-center mb-1.5">
-                                <span class="text-xs text-gray-500 font-mono">${g.commence_time.substring(11,16)} UTC</span>
+                            <div class="flex justify-between items-start mb-1.5">
+                                <div class="text-[10px] text-gray-500 font-mono leading-tight">
+                                    🇺🇸 ${times.est}<br>
+                                    <span class="text-sky-500 font-bold">🇹🇼 ${times.tw}</span>
+                                </div>
                                 ${getCompactBadge(g)}
                             </div>
-                            <div class="text-sm font-bold text-white">${g.away} VS ${g.home}</div>
+                            <div class="text-sm font-bold text-white mt-1">${g.away} VS ${g.home}</div>
                         </div>
                         <div class="grid grid-cols-2 gap-2 text-xs text-gray-400 mt-2 font-mono border-t border-gray-800/40 pt-2">
                             <div>大小幅度: <span class="text-sky-400 font-bold">${g.delta.total > 0 ? '+'+g.delta.total : g.delta.total}</span></div>
@@ -174,7 +194,7 @@
                     container.appendChild(card);
                 });
             } catch {
-                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 數據讀取失敗，請確認 Render 後台是否正常運作。</div>`;
+                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 數據同步異常，請重新整理</div>`;
             }
         }
 
@@ -186,7 +206,10 @@
             document.getElementById("chart-placeholder").classList.add("hidden");
             document.getElementById("chart-content").classList.remove("hidden");
             document.getElementById("selected-matchup").innerText = `${game.away} VS ${game.home}`;
-            document.getElementById("selected-time").innerText = `開賽時間: ${game.commence_time.substring(0,16).replace('T',' ')} UTC`;
+            
+            const times = formatDualTime(game.commence_time);
+            document.getElementById("selected-time-est").innerText = `🇺🇸 美東開賽: ${times.est}`;
+            document.getElementById("selected-time-tw").innerText = `🇹🇼 台灣時間: ${times.tw}`;
 
             const calibrationText = document.getElementById("calibration-text");
             const calibrationRating = document.getElementById("calibration-rating");
@@ -222,10 +245,10 @@
                 verdictDesc.innerHTML = `<b>量化理由：</b> 盤口死水狀態，昨日盲區復盤顯示此種停滯極易落入莊家獵殺區。<b>此時不建議買任何大小分或主隊贏！</b>`;
             }
 
-            calibrationText.innerText = "當前狀態 -> 已成功對齊美東日期交叉校正核心";
-            calibrationRating.innerText = "日期精準校正中";
+            calibrationText.innerText = "當前狀態 -> 已成功對齊美東日期與台灣本地時間雙軌校正";
+            calibrationRating.innerText = "雙時區聯動";
             calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-            guideText.innerHTML = `👉 <b>今日實戰指南：</b> 盤口未動時千萬別盲信初盤，請鎖定美東日期，觀察臨場前 30 分鐘是否有單邊 Delta 突破。`;
+            guideText.innerHTML = `👉 <b>今日實戰指南：</b> 請隨時留意卡片上對應的台灣本地時間（藍字），以便於你在賽前 30 分鐘鎖定替代盤口進行降階防禦。`;
 
             const labels = game.history.map(h => h.ts.substring(11,16));
             if(myChart) myChart.destroy();
@@ -260,12 +283,17 @@
                     if (row.ml_winner_result === "HOME") verifyHtml += `<div class="text-amber-400 text-[11px]">🏠 主隊贏盤</div>`;
                     else if (row.ml_winner_result === "AWAY") verifyHtml += `<div class="text-slate-400 text-[11px]">✈️ 客隊贏盤</div>`;
 
+                    const times = formatDualTime(row.commence_time);
+
                     const tr = document.createElement("tr");
                     tr.className = `border-b border-gray-800/60 hover:bg-gray-900/40 transition-all`;
                     tr.innerHTML = `
-                        <td class="p-3">
-                            <div class="font-bold text-white">${row.away} VS ${row.home}</div>
-                            <div class="text-[10px] text-gray-500 font-normal">${row.commence_time.substring(5,16).replace('T',' ')}</div>
+                        <td class="p-3 leading-tight">
+                            <div class="font-bold text-white mb-0.5">${row.away} VS ${row.home}</div>
+                            <div class="text-[10px] text-gray-500 font-normal">
+                                美東: ${times.est}<br>
+                                <span class="text-sky-500">台灣: ${times.tw}</span>
+                            </div>
                         </td>
                         <td class="p-3 text-gray-400">初大小: <b>${row.opening_total||'--'}</b> -> 終: <b>${row.closing_total||'--'}</b></td>
                         <td class="p-3 font-mono text-sky-400 font-bold">大小變動: ${row.total_changed_delta}</td>
