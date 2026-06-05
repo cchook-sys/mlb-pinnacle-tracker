@@ -1,15 +1,26 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-<head><meta charset="UTF-8"><title>Debug Tracker</title></head>
-<body class="bg-black text-white p-4">
-    <h1 class="text-xl">即時數據偵錯區</h1>
-    <pre id="debug" class="text-xs text-green-400"></pre>
+<body class="bg-black text-white p-4 font-sans">
+    <h1 class="text-2xl font-bold mb-4">MLB 數據監控 (現場直出版)</h1>
+    <div id="status" class="text-sm text-gray-400 mb-4">同步時間: --:--:--</div>
+    <div id="games-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
     <script>
-        fetch("https://mlb-pinnacle-tracker.onrender.com/games")
-            .then(r => r.json())
-            .then(d => {
-                document.getElementById("debug").innerText = JSON.stringify(d, null, 2);
+        async function fetchGames() {
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            document.getElementById("status").innerText = "最後同步: " + json.system_updated_at;
+            const list = document.getElementById("games-list");
+            list.innerHTML = "";
+            json.data.forEach(g => {
+                list.innerHTML += `<div class="bg-gray-900 p-4 rounded border border-gray-700">
+                    <div class="font-bold text-lg">${g.away} VS ${g.home}</div>
+                    <div class="text-xs text-gray-500">${g.commence_time}</div>
+                    <div class="mt-2 text-sm text-sky-400">總分盤: ${g.latest.total || '--'} | 獨贏: ${g.latest.ml_home || '--'}</div>
+                </div>`;
             });
+        }
+        setInterval(fetchGames, 60000); // 每分鐘自動刷新
+        fetchGames();
     </script>
 </body>
 </html>
