@@ -30,15 +30,15 @@ except Exception as e:
 
 async def fetch_and_store():
     if not ODDS_API_KEY:
-        return
+        return []
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
             if res.status_code != 200:
-                return
+                return []
             games = res.json()
-            ts = int(time.time())
+            ts    = int(time.time())
 
             for game in games:
                 pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
@@ -68,9 +68,10 @@ async def fetch_and_store():
 
                 if has_changed or (last_snap and (ts - last_snap["ts"]) >= 7200):
                     snaps_col.insert_one(snap)
-            print("Fetch and store snapshots completed.")
+            return games
     except Exception as e:
         print(f"Fetch failed: {e}")
+        return []
 
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
@@ -141,7 +142,6 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 滾動自動清除過期資料 (維持精簡 2 天賽果數據)
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -152,7 +152,8 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def app_lifespan(app_instance: FastAPI):
-    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch", next_run_time=datetime.now())
+    await fetch_and_store()
+    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
     yield
@@ -169,15 +170,16 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# ── 💡 路由 1：無腦直出最新大聯盟賽事（包攬今明所有已開盤場次） ─────────────────
+# ── 💡 核心優化：Games 接口現場強制作業，保證通電現形 ─────────────────────────
 @app.get("/games")
 async def get_games():
+    # 現場強制向 odds API 同步最新數據
     await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    # 過濾條件：從 6 小時前開始，一路看到未來 36 小時。有盤口就直接抓出來，不需要切換日期！
+    # 取消過窄的時間過濾，放寬到未來 48 小時內所有開盤賽事一律全送！
     start_filter = (now - timedelta(hours=6)).isoformat()
-    end_filter = (now + timedelta(hours=36)).isoformat()
+    end_filter = (now + timedelta(hours=48)).isoformat()
     
     all_snaps = list(snaps_col.find({
         "commence_time": {"$gte": start_filter, "$lte": end_filter}
@@ -190,7 +192,7 @@ async def get_games():
             games[gid] = []
         games[gid].append(s)
 
-    result = []
+    result_list = []
     for gid, snaps in games.items():
         snaps_sorted = sorted(snaps, key=lambda x: x["ts"])
         latest = snaps_sorted[-1]
@@ -199,7 +201,7 @@ async def get_games():
         total_delta = round(float(latest.get("total", 0)) - float(first.get("total", 0)), 2) if (latest.get("total") is not None and first.get("total") is not None) else 0
         ml_home_delta = int(latest.get("ml_home", 0)) - int(first.get("ml_home", 0)) if (latest.get("ml_home") is not None and first.get("ml_home") is not None) else 0
 
-        result.append({
+        result_list.append({
             "game_id":       gid,
             "home":          latest["home"],
             "away":          latest["away"],
@@ -216,8 +218,16 @@ async def get_games():
             "history": [{"ts": s.get("ts_iso"), "total": s.get("total"), "ml_home": s.get("ml_home")} for s in snaps_sorted],
         })
 
-    result.sort(key=lambda x: x["commence_time"])
-    return result
+    result_list.sort(key=lambda x: x["commence_time"])
+    
+    # 💡 核心新增：現場計算出當前台北時間的字串戳記包裹打包，回傳前端對時
+    tw_now = datetime.now(timezone(timedelta(hours=8)))
+    timestamp_str = tw_now.strftime("%m/%d %H:%M:%S")
+    
+    return {
+        "system_updated_at": timestamp_str,
+        "data": result_list
+    }
 
 @app.get("/analytics/dataset")
 async def get_training_dataset():
