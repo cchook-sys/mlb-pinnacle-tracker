@@ -1,11 +1,3 @@
-"""
-MLB Pinnacle 數據量化後端 (週二經典 FastAPI 異步穩定完全體)
-- 100% 經典還原：回歸週二最穩定的 FastAPI + httpx 異步架構，消滅連線當機
-- 數據防護：保留去重防禦與智能寫入，確保隔天對答案資料最完整、絕不漏場
-- 當日賽事聚焦：/games 路由只抓前後 12 小時當日賽事，減輕機房負擔
-- 48h 滾動風控：/analytics/dataset 路由會自動刪除大於兩天前的過期歷史，防止免費空間爆艙
-"""
-
 import os
 import time
 import httpx
@@ -22,11 +14,11 @@ import certifi
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
 BOOKMAKER    = "pinnacle"
-MARKETS      = "h2h,totals,spreads"
+MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
-# ── Database (MongoDB Atlas) ──────────────────────────────────────────────────
+# ── Database ──────────────────────────────────────────────────────────────────
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 try:
@@ -34,9 +26,9 @@ try:
     db = client["mlb_tracker"]
     snaps_col = db["snapshots"]
     results_col = db["results"]
-    print("✅ 成功連線至 MongoDB Atlas 雲端資料庫！")
+    print("MongoDB Connected Successfully")
 except Exception as e:
-    print(f"❌ MongoDB 連線失敗: {e}")
+    print(f"MongoDB Connection Failed: {e}")
 
 # ── 智慧盤口抓取與去重儲存 ──────────────────────────────────────────────────────
 async def fetch_and_store():
@@ -46,8 +38,8 @@ async def fetch_and_store():
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            res = await client.get(url)
+        async with httpx.AsyncClient(timeout=15) as async_client:
+            res = await async_client.get(url)
             if res.status_code != 200:
                 return
 
@@ -60,11 +52,11 @@ async def fetch_and_store():
                 if not pin:
                     continue
 
-                totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
-                h2h     = next((m for m in pin["markets"] if m["key"] == "h2h"),     None)
+                totals = next((m for m in pin["markets"] if m["key"] == "totals"), None)
+                h2h    = next((m for m in pin["markets"] if m["key"] == "h2h"), None)
 
-                over   = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Over"),          None)
-                ml_home = next((o for o in (h2h    or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
+                over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None)
+                ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
 
                 snap = {
                     "game_id":      game["id"],
@@ -73,8 +65,8 @@ async def fetch_and_store():
                     "commence_time": game["commence_time"],
                     "ts":           ts,
                     "ts_iso":       datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
-                    "total":        over["point"]  if over  else None,
-                    "over_juice":   over["price"]  if over  else None,
+                    "total":        over["point"] if over else None,
+                    "over_juice":   over["price"] if over else None,
                     "ml_home":      ml_home["price"] if ml_home else None,
                 }
 
@@ -85,11 +77,11 @@ async def fetch_and_store():
                     snaps_col.insert_one(snap)
                     stored += 1
 
-            print(f"✅ 智慧儲存：本輪共寫入 {stored}/{len(games)} 場關鍵盤口變動快照。")
+            print(f"Fetch completed. Stored {stored} snapshots.")
     except Exception as e:
-        print(f"❌ 盤口抓取失敗: {e}")
+        print(f"Fetch job failed: {e}")
 
-# ── 完賽賽果結算排程 & 48小時滾動自動刪除 ────────────────────────────────────────
+# ── 完賽賽果自動結算排程 & 48小時自動滾動刪除 ────────────────────────────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -97,8 +89,8 @@ async def fetch_and_settle_results():
     url = f"{BASE_URL}/sports/{SPORT}/scores/?apiKey={ODDS_API_KEY}&daysFrom=3"
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            res = await client.get(url)
+        async with httpx.AsyncClient(timeout=15) as async_client:
+            res = await async_client.get(url)
             if res.status_code != 200:
                 return
 
@@ -170,29 +162,28 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 自動判定時間，清空 48 小時前（前兩天）的過期歷史與舊快照
+            # 💡 自動判定時間，清空 48 小時前的舊數據參考
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-            print(f"🎯 昨日賽果結算完畢！新增 {settled_count} 場，老舊過期賽事已自動滾動刪除。")
+            print(f"Settle completed. Added {settled_count} rows. Overdated rows purged.")
     except Exception as e:
-        print(f"❌ 賽果結算失敗: {e}")
+        print(f"Settle job failed: {e}")
 
-# ── 排程系統設定 ──────────────────────────────────────────────────────────────
+# ── 排程啟動設定 ──────────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def app_lifespan(app_instance: FastAPI):
     await fetch_and_store()
     scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
-    print("⏰ 週二異步排程核心完美歸位")
     yield
     scheduler.shutdown()
 
 # ── FastAPI App 宣告 ──────────────────────────────────────────────────────────
-app = FastAPI(title="MLB Pinnacle Tracker", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker", lifespan=app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -205,9 +196,9 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "MLB FastAPI Core Clean Version"}
+    return {"status": "ok", "service": "MLB FastAPI Core V9 Clean"}
 
-# ── 路由 1：獲取即時看盤 (聚焦當日前後 12 小時賽事) ───────────────────────────
+# ── 路由 1：獲取即時看盤 (聚焦當日前後 12 小時當日賽事) ───────────────────────────
 @app.get("/games")
 async def get_games():
     await fetch_and_store()
@@ -281,6 +272,10 @@ async def get_training_dataset():
     dataset = []
     
     for r in results:
+        open_t = r.get("opening_total", 0) or 0
+        close_t = r.get("closing_total", 0) or 0
+        delta_t = round(close_t - open_t, 2)
+
         dataset.append({
             "game_id": r["game_id"],
             "home": r["home"],
@@ -288,7 +283,7 @@ async def get_training_dataset():
             "commence_time": r["commence_time"],
             "opening_total": r.get("opening_total"),
             "closing_total": r.get("closing_total"),
-            "total_changed_delta": round((r.get("closing_total", 0) - r.get("opening_total", 0)), 2) if (r.get("closing_total") and r.get("opening_total")) else 0,
+            "total_changed_delta": delta_t,
             "opening_ml_home": r.get("opening_ml_home"),
             "closing_ml_home": r.get("closing_ml_home"),
             "final_home_score": r["home_score"],
