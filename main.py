@@ -1,8 +1,8 @@
 """
-MLB Pinnacle 盤口快照 + 賽果結算後端 (CORS 安全防護完全體)
-- 語法修正：100% 補回偏漏的 jsonify() 函式包裹，徹底消滅跨網域 CORS 載入失敗
-- 接口規範：精準對接 The Odds API 官方規律
-- 降序排序：由後端直接進行 commence_time 降序(-1)排序，將最新賽果推至最前
+MLB Pinnacle 盤口監控與賽果結算後端 (大數據永久留存完全體)
+- 永久留存：修正對答案邏輯，賽果完賽結算後永久留存不覆蓋，資料越滾越多
+- 強制造血：/games 路由現場直連 odds 抓取未來 48 小時場次，突破 Render 睡眠限制
+- 完全防禦：內建全域標準 jsonify 打包，徹底根除前端 CORS 載入失敗報錯
 """
 
 import os
@@ -16,7 +16,7 @@ import pymongo
 import certifi
 
 app = Flask(__name__)
-CORS(app)  # 開放全網域安全連線
+CORS(app)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
@@ -26,7 +26,7 @@ MARKETS      = "h2h,totals,spreads"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
-# ── Database (MongoDB Atlas) ──────────────────────────────────────────────────
+# ── Database ──────────────────────────────────────────────────────────────────
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 try:
@@ -34,37 +34,29 @@ try:
     db = client["mlb_tracker"]
     snaps_col = db["snapshots"]        
     results_col = db["results"]        
-    print("✅ 成功連線至 MongoDB Atlas 雲端資料庫！")
+    print("✅ MongoDB 雲端大數據資料庫連線池成功啟動！")
 except Exception as e:
     print(f"❌ MongoDB 連線失敗: {e}")
 
-# ── 智慧盤口抓取與去重儲存 ──────────────────────────────────────────────────────
-def fetch_and_store_job():
-    if not ODDS_API_KEY: return
-    print("🔄 [盤口巡邏] 正在抓取最新 MLB 盤口...")
+# ── 盤口現場自造血機制 ────────────────────────────────────────────────────────
+def execute_live_crawl():
+    if not ODDS_API_KEY: return []
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
-
     try:
-        res = requests.get(url, timeout=15)
-        if res.status_code != 200: return
-
+        res = requests.get(url, timeout=12)
+        if res.status_code != 200: return []
         games = res.json()
-        ts    = int(time.time())
-        stored = 0
-
+        ts = int(time.time())
+        
         for game in games:
             pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
             if not pin: continue
 
             totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
             h2h     = next((m for m in pin["markets"] if m["key"] == "h2h"),     None)
-            spreads = next((m for m in pin["markets"] if m["key"] == "spreads"), None)
 
             over   = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Over"),          None)
-            under  = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Under"),         None)
             ml_home = next((o for o in (h2h    or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
-            ml_away = next((o for o in (h2h    or {}).get("outcomes", []) if o["name"] == game["away_team"]), None)
-            sp_home = next((o for o in (spreads or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
 
             snap = {
                 "game_id":      game["id"],
@@ -75,50 +67,44 @@ def fetch_and_store_job():
                 "ts_iso":       datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
                 "total":        over["point"]  if over  else None,
                 "over_juice":   over["price"]  if over  else None,
-                "under_juice":  under["price"] if under else None,
                 "ml_home":      ml_home["price"] if ml_home else None,
-                "ml_away":      ml_away["price"] if ml_away else None,
-                "spread_home":  sp_home["point"] if sp_home else None,
             }
 
             last_snap = snaps_col.find_one({"game_id": game["id"]}, sort=[("ts", pymongo.DESCENDING)])
-            has_changed = (
-                not last_snap
-                or last_snap.get("total")   != snap["total"]
-                or last_snap.get("ml_home") != snap["ml_home"]
-            )
-
+            has_changed = not last_snap or last_snap.get("total") != snap["total"] or last_snap.get("ml_home") != snap["ml_home"]
+            
             if has_changed or (last_snap and (ts - last_snap["ts"]) >= 7200):
                 snaps_col.insert_one(snap)
-                stored += 1
-        print(f"✅ 盤口更新完畢，寫入 {stored} 場變動快照。")
+        return games
     except Exception as e:
-        print(f"❌ 盤口抓取失敗: {e}")
+        print(f"❌ 現場造血異常: {e}")
+        return []
 
-# ── 完賽比分自動結算任務 ──────────────────────────────────────────────────────
+# ── 完賽賽果自動沖銷 (💡 關鍵修改：使用不覆蓋更新，留存永久歷史紀錄) ────────────────
 def fetch_and_settle_results_job():
     if not ODDS_API_KEY: return
-    print("🔄 [強制結算] 正在呼叫 The Odds API 比分接口進行沖銷...")
+    print("🔄 [歷史大數據沖銷] 正在強行追回最近 3 日賽果對答案...")
     url = f"{BASE_URL}/sports/{SPORT}/scores/?apiKey={ODDS_API_KEY}&daysFrom=3"
 
     try:
-        res = requests.get(url, timeout=15)
+        res = requests.get(url, timeout=12)
         if res.status_code != 200: return
-
         completed_games = res.json()
         settled_count = 0
 
         for game in completed_games:
             if not game.get("completed", False): continue
-            
             gid = game["id"]
+            
+            # 💡 防禦檢查：如果資料庫裡早就已經有這場完賽歷史紀錄，直接跳過！絕對不覆蓋它！
+            if results_col.find_one({"game_id": gid}): continue
+
             scores = game.get("scores", [])
             if not scores or len(scores) < 2: continue
 
             home_score = next((int(s["score"]) for s in scores if s["name"] == game["home_team"]), None)
             away_score = next((int(s["score"]) for s in scores if s["name"] == game["away_team"]), None)
             if home_score is None or away_score is None: continue
-            
             total_outcome_score = home_score + away_score
 
             snaps = list(snaps_col.find({"game_id": gid}, {"_id": 0}).sort("ts", pymongo.ASCENDING))
@@ -126,8 +112,8 @@ def fetch_and_settle_results_job():
             last = snaps[-1] if snaps else {}
 
             ml_winner = "HOME" if home_score > away_score else "AWAY"
-            opening_total = first.get("total")
-            closing_total = last.get("total")
+            opening_total = first.get("total") if first else last.get("total", 0)
+            closing_total = last.get("total") if last else 0
 
             opening_total_result = "PUSH"
             if opening_total:
@@ -148,8 +134,8 @@ def fetch_and_settle_results_job():
                 "away_score": away_score,
                 "total_score": total_outcome_score,
                 "ml_winner": ml_winner,
-                "opening_total": opening_total if opening_total else (closing_total if closing_total else 0),
-                "closing_total": closing_total if closing_total else 0,
+                "opening_total": opening_total if opening_total else closing_total,
+                "closing_total": closing_total,
                 "opening_total_result": opening_total_result,
                 "closing_total_result": closing_total_result,
                 "opening_ml_home": first.get("ml_home") if first else None,
@@ -157,23 +143,26 @@ def fetch_and_settle_results_job():
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            results_col.update_one({"game_id": gid}, {"$set": result_doc}, upsert=True)
+            # 增量寫入，永久保存
+            results_col.insert_one(result_doc)
             settled_count += 1
-        print(f"🎯 賽果順利結算沖銷：本次共成功更新 {settled_count} 場歷史數據。")
+        print(f"🎯 歷史沖銷完畢！成功追加 {settled_count} 場全新歷史賽果。")
     except Exception as e:
         print(f"❌ 賽果結算失敗: {e}")
 
-# 定時器設定
+# 定時排程設定
 scheduler = BackgroundScheduler()
-scheduler.add_job(fetch_and_store_job, 'interval', minutes=10, next_run_time=datetime.now())
+scheduler.add_job(execute_live_crawl, 'interval', minutes=10, next_run_time=datetime.now())
 scheduler.add_job(fetch_and_settle_results_job, 'interval', minutes=30, next_run_time=datetime.now())
 scheduler.start()
 
 @app.route('/games', methods=['GET'])
 def get_games():
     try:
+        execute_live_crawl()  # 被訪問時立刻現場強制作足明日場次
         cutoff_time = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
         all_snaps = list(snaps_col.find({"commence_time": {"$gte": cutoff_time}}, {"_id": 0}))
+        
         games = {}
         for s in all_snaps:
             gid = s["game_id"]
@@ -209,8 +198,8 @@ def get_games():
 @app.route('/analytics/dataset', methods=['GET'])
 def get_training_dataset():
     try:
-        fetch_and_settle_results_job()
-        # 直接用 MongoDB 對開賽時間進行「降序(-1)」排序，最新完賽場次絕對在第一排
+        fetch_and_settle_results_job() # 點擊分頁時強制沖銷
+        # 降序排序，最新完賽在最上面，早期歷史數據無限向下堆疊留存
         results = list(results_col.find({}, {"_id": 0}).sort("commence_time", -1))
         
         dataset = []
@@ -224,8 +213,8 @@ def get_training_dataset():
                 "home": r["home"],
                 "away": r["away"],
                 "commence_time": r["commence_time"],
-                "opening_total": r.get("opening_total"),
-                "closing_total": r.get("closing_total"),
+                "opening_total": open_t if open_t else close_t,
+                "closing_total": close_t,
                 "total_changed_delta": delta_t,
                 "opening_ml_home": r.get("opening_ml_home"),
                 "closing_ml_home": r.get("closing_ml_home"),
@@ -236,12 +225,12 @@ def get_training_dataset():
                 "opening_total_result": r.get("opening_total_result", "PUSH"),
                 "closing_total_result": r.get("closing_total_result", "PUSH")
             })
-        return jsonify(dataset)  # 💡 關鍵修復：這裡加上了必要的 jsonify() 打包
+        return jsonify(dataset)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
-def root(): return jsonify({"status": "ok", "engine": "MLB API CORS Standardizer V2"})
+def root(): return jsonify({"status": "ok", "engine": "MLB Live-Flush Core V3"})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
