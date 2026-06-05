@@ -138,7 +138,8 @@
 
         async function loadDashboard() {
             try {
-                const res = await fetch(`${API_BASE}/games`);
+                // 💡 加入隨機時間戳防快取標籤，強迫 Render 吐出 48 小時內新快照
+                const res = await fetch(`${API_BASE}/games?nocache=${Date.now()}`);
                 fetchedGames = await res.json();
                 const container = document.getElementById("games-list");
                 container.innerHTML = "";
@@ -261,7 +262,8 @@
             const tbody = document.getElementById("history-table-body");
             tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-500">🔄 正在加載歷史對答案大數據...</td></tr>`;
             try {
-                const res = await fetch(`${API_BASE}/analytics/dataset`);
+                // 💡 歷史對答案也加上隨機時間戳，強迫打破跨網域舊快取限制
+                const res = await fetch(`${API_BASE}/analytics/dataset?nocache=${Date.now()}`);
                 const dataset = await res.json();
                 tbody.innerHTML = "";
 
