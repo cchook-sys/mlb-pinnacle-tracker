@@ -25,6 +25,12 @@ try:
     snaps_col = db["snapshots"]
     results_col = db["results"]
     print("MongoDB Connected Successfully")
+    
+    # 💡 【終極大絕招：全自動清空 MongoDB 雲端資料庫】
+    # 開機時直接無條件清空 snapshots 與 results，徹底排除舊髒資料的干擾
+    snaps_col.delete_many({})
+    results_col.delete_many({})
+    print("🧹 [資料庫清空令] 已成功將雲端 MongoDB 歷史殘留舊快照與賽果全數洗淨！")
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
@@ -142,6 +148,7 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
+            # 48小時滾動自動刪除過期賽果數據
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -170,15 +177,14 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# ── 💡 核心優化：Games 接口現場強制作業，保證通電現形 ─────────────────────────
 @app.get("/games")
 async def get_games():
-    # 現場強制向 odds API 同步最新數據
+    # 當有人點擊時，現場強制去敲 odds API 重新向資料庫注入最純淨的當下活水
     await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    # 取消過窄的時間過濾，放寬到未來 48 小時內所有開盤賽事一律全送！
-    start_filter = (now - timedelta(hours=6)).isoformat()
+    # 開放時間過濾窗：從 12 小時前一直到未來 48 小時
+    start_filter = (now - timedelta(hours=12)).isoformat()
     end_filter = (now + timedelta(hours=48)).isoformat()
     
     all_snaps = list(snaps_col.find({
@@ -220,7 +226,6 @@ async def get_games():
 
     result_list.sort(key=lambda x: x["commence_time"])
     
-    # 💡 核心新增：現場計算出當前台北時間的字串戳記包裹打包，回傳前端對時
     tw_now = datetime.now(timezone(timedelta(hours=8)))
     timestamp_str = tw_now.strftime("%m/%d %H:%M:%S")
     
