@@ -28,12 +28,10 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-# 💡 精密轉換：將 UTC 時間轉換為美東日期 (EDT夏令時間一般為 UTC-4)
 def get_est_date_string(utc_str: str) -> str:
     try:
         clean_ts = utc_str.replace("Z", "")
         dt_utc = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
-        # 對齊美職慣用夏令時間，採用 UTC-4 進行日期切分
         dt_est = dt_utc.astimezone(timezone(timedelta(hours=-4)))
         return dt_est.strftime("%Y-%m-%d")
     except:
@@ -152,7 +150,6 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 48小時滾動自動清除過期資料
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -182,9 +179,8 @@ app.add_middleware(
 )
 
 @app.get("/games")
-async def get_games(date: str = Query(None, description="美東日期 YYYY-MM-DD")):
+async def get_games(date: str = Query(None)):
     if not date:
-        # 預設對齊當前美東夏令時間
         est_now = datetime.now(timezone.utc) - timedelta(hours=4)
         date = est_now.strftime("%Y-%m-%d")
 
