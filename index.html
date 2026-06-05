@@ -1,37 +1,41 @@
-async function fetchGames() {
-    try {
-        const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-        const json = await res.json();
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<body class="bg-slate-950 text-slate-200 p-4 font-sans">
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-2xl font-black text-white mb-4">⚾ MLB Pinnacle 數據量化 (週三完全體)</h1>
+        <div id="status" class="text-xs text-sky-400 mb-6 font-mono">同步時間: --:--:--</div>
         
-        document.getElementById("status").innerText = "最後同步: " + (json.system_updated_at || "未知");
-        const list = document.getElementById("games-list");
-        list.innerHTML = "";
-        
-        const games = json.data || [];
-        games.forEach(function(g) {
-            const bookies = g.bookmakers || [];
-            const pin = bookies.find(function(b) { return b.key === 'pinnacle'; }) || bookies[0];
-            const pinKey = pin ? pin.key : '無數據';
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div id="games-list" class="md:col-span-1 space-y-4"></div>
+            <div id="chart-area" class="md:col-span-2 bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                <canvas id="myChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        async function fetchGames() {
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            document.getElementById("status").innerText = "最後同步: " + json.system_updated_at;
+            const list = document.getElementById("games-list");
+            list.innerHTML = "";
             
-            // 創建容器
-            const item = document.createElement("div");
-            item.className = "bg-gray-900 p-4 rounded border border-gray-700 mb-2";
-            
-            // 使用純文字節點，完全避開字串拼接錯誤
-            const title = document.createElement("div");
-            title.className = "font-bold text-lg";
-            title.textContent = g.away_team + " VS " + g.home_team;
-            
-            const source = document.createElement("div");
-            source.className = "text-xs text-gray-500";
-            source.textContent = "來源: " + pinKey;
-            
-            item.appendChild(title);
-            item.appendChild(source);
-            list.appendChild(item);
-        });
-    } catch (e) {
-        document.getElementById("status").innerText = "錯誤: 無法獲取數據";
-        console.error(e);
-    }
-}
+            json.data.forEach(g => {
+                const card = document.createElement("div");
+                card.className = "bg-slate-900 p-4 rounded-xl border border-slate-700 hover:border-sky-500 cursor-pointer";
+                card.innerHTML = `
+                    <div class="font-bold text-white">${g.away} VS ${g.home}</div>
+                    <div class="flex justify-between mt-2 text-sm">
+                        <span class="text-sky-400">獨贏: ${g.latest.ml_home}</span>
+                        <span class="text-amber-400">大小分: ${g.latest.total}</span>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+        }
+        fetchGames();
+    </script>
+</body>
+</html>
