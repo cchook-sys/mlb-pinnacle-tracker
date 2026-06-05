@@ -3,37 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板 - 終極回歸版</title>
+    <title>MLB Pinnacle 數據量化儀表板 - 美東日期版</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { background-color: #0d1117; color: #c9d1d9; }
         .card-active { border-color: #38bdf8; box-shadow: 0 0 15px rgba(56, 189, 248, 0.2); }
         .tab-active { background-color: #1e293b; border-color: #38bdf8; color: #fff; }
-        .premium-recommend { background: linear-gradient(90deg, rgba(251,191,36,0.1) 0%, rgba(13,17,23,0) 100%); border-left: 4px solid #fbbf24 !important; }
     </style>
 </head>
 <body class="p-2 md:p-8">
 
     <div class="max-w-7xl mx-auto">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-8 gap-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-6 gap-4">
             <div>
                 <h1 class="text-xl md:text-3xl font-extrabold text-white tracking-tight flex items-center flex-wrap gap-2">
                     ⚾ MLB Pinnacle 數據量化
                     <span class="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">🟢 已連線</span>
-                    <span id="system-time" class="text-[10px] md:text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono border border-slate-700">🕒 系統最後更新: --/-- --:--:--</span>
                 </h1>
             </div>
             
-            <div class="flex gap-2 w-full md:w-auto">
-                <button id="btn-live" onclick="switchMode('live')" class="flex-1 md:flex-none tab-active border border-gray-800 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer">🔥 即時監控看盤</button>
-                <button id="btn-history" onclick="switchMode('history')" class="flex-1 md:flex-none bg-gray-900 border border-gray-800 text-gray-400 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer hover:text-white">📊 昨日歷史結算分析</button>
+            <div class="flex items-center gap-4 w-full md:w-auto">
+                <div class="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg">
+                    <span class="text-xs text-amber-400 font-bold">📅 美東日期:</span>
+                    <input type="date" id="est-date-picker" onchange="loadDashboard()" class="bg-transparent text-white text-sm font-bold font-mono focus:outline-none cursor-pointer">
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-live" onclick="switchMode('live')" class="tab-active border border-gray-800 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer">🔥 即時監控看盤</button>
+                    <button id="btn-history" onclick="switchMode('history')" class="bg-gray-900 border border-gray-800 text-gray-400 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer hover:text-white">📊 昨日歷史結算分析</button>
+                </div>
             </div>
         </div>
 
         <div id="live-view" class="grid grid-cols-12 gap-6">
             <div class="col-span-5 space-y-2 max-h-[85vh] overflow-y-auto pr-1" id="games-list">
-                <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入即時大數據盤口...</div>
+                <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入該美東日期的盤口...</div>
             </div>
             
             <div class="col-span-7 bg-gray-900/50 border border-gray-800 rounded-xl p-6 max-h-[85vh] overflow-y-auto sticky top-4" id="chart-container">
@@ -98,27 +102,19 @@
         let fetchedGames = [];
         let myChart = null;
 
+        // 💡 頁面初始化：預設自動填入今天的「美東日期」
+        window.addEventListener('DOMContentLoaded', () => {
+            const estToday = new Date(new Date().getTime() - (5 * 60 * 60 * 1000));
+            document.getElementById('est-date-picker').value = estToday.toISOString().split('T')[0];
+            loadDashboard();
+        });
+
         function getCompactBadge(game) {
             const deltaTotal = game.delta ? game.delta.total : 0;
             const deltaML = game.delta ? game.delta.ml_home : 0;
-
-            if (Math.abs(deltaTotal) >= 0.5 || deltaML <= -15) {
-                return `<span class="bg-rose-500 text-white font-black text-[10px] px-2 py-0.5 rounded shadow animate-pulse">🎯 進場</span>`;
-            }
-            if (Math.abs(deltaTotal) >= 0.25 || Math.abs(deltaML) >= 5) {
-                return `<span class="bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-[10px] px-2 py-0.5 rounded">⚠️ 觀察</span>`;
-            }
+            if (Math.abs(deltaTotal) >= 0.5 || deltaML <= -15) return `<span class="bg-rose-500 text-white font-black text-[10px] px-2 py-0.5 rounded shadow animate-pulse">🎯 進場</span>`;
+            if (Math.abs(deltaTotal) >= 0.25 || Math.abs(deltaML) >= 5) return `<span class="bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-[10px] px-2 py-0.5 rounded">⚠️ 觀察</span>`;
             return `<span class="bg-gray-800 text-gray-500 text-[10px] px-2 py-0.5 rounded">💤 觀望</span>`;
-        }
-
-        function updateSystemRefreshTime() {
-            const now = new Date();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const date = String(now.getDate()).padStart(2, '0');
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            document.getElementById("system-time").innerText = `🕒 系統最後更新: ${month}/${date} ${hours}:${minutes}:${seconds}`;
         }
 
         function switchMode(mode) {
@@ -138,13 +134,14 @@
 
         async function loadDashboard() {
             try {
-                const res = await fetch(`${API_BASE}/games?nocache=${Date.now()}`);
+                const selectedDate = document.getElementById('est-date-picker').value;
+                const res = await fetch(`${API_BASE}/games?date=${selectedDate}&nocache=${Date.now()}`);
                 fetchedGames = await res.json();
                 const container = document.getElementById("games-list");
                 container.innerHTML = "";
 
                 if(!fetchedGames || fetchedGames.length === 0) {
-                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 暫無賽事 (等待下一輪新場次放盤)</div>`;
+                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 該美東日期暫無賽事 (請切換到明後天日期查看)</div>`;
                     return;
                 }
 
@@ -156,7 +153,7 @@
                     card.innerHTML = `
                         <div>
                             <div class="flex justify-between items-center mb-1.5">
-                                <span class="text-xs text-gray-500 font-mono">${g.commence_time.substring(5,16).replace('T',' ')}</span>
+                                <span class="text-xs text-gray-500 font-mono">${g.commence_time.substring(5,16).replace('T',' ')} UTC</span>
                                 ${getCompactBadge(g)}
                             </div>
                             <div class="text-sm font-bold text-white">${g.away} VS ${g.home}</div>
@@ -168,9 +165,8 @@
                     `;
                     container.appendChild(card);
                 });
-                updateSystemRefreshTime();
             } catch {
-                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 伺服器同步中，請稍候重整</div>`;
+                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 伺服器通訊異常，請稍候重整</div>`;
             }
         }
 
@@ -182,12 +178,11 @@
             document.getElementById("chart-placeholder").classList.add("hidden");
             document.getElementById("chart-content").classList.remove("hidden");
             document.getElementById("selected-matchup").innerText = `${game.away} VS ${game.home}`;
-            document.getElementById("selected-time").innerText = `開賽時間: ${game.commence_time.substring(0,16).replace('T',' ')}`;
+            document.getElementById("selected-time").innerText = `開賽時間: ${game.commence_time.substring(0,16).replace('T',' ')} UTC`;
 
             const calibrationText = document.getElementById("calibration-text");
             const calibrationRating = document.getElementById("calibration-rating");
             const guideText = document.getElementById("betting-guide-text");
-
             const verdictPanel = document.getElementById("final-verdict-panel");
             const verdictTitle = document.getElementById("final-verdict-title");
             const verdictDesc = document.getElementById("final-verdict-desc");
@@ -201,46 +196,28 @@
                 verdictPanel.className = "p-4 rounded-xl border border-rose-500 bg-rose-500/10 flex flex-col gap-1.5 font-sans shadow-lg animate-pulse";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-rose-400";
                 verdictTitle.innerHTML = `🔥 最終推薦：搶進 【 大 分 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 美金大資金盤口單邊強力突破（幅度達到 ${deltaTotal}），歷史回測勝率高。建議立即下注，若怕卡死終盤，請搭配替代盤口買進降階的 <b>「${currentTotal - 0.5} 大」</b> 更加穩當！`;
-
-                calibrationText.innerText = "當前觸發【STEAM_OVER (大資金砸大分)】特徵 -> 歷史統計大分精準率: 62.5%";
-                calibrationRating.innerText = "優質提款特徵";
-                calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-                guideText.innerHTML = `市場核心資金正在瘋狂灌注大分！目前終盤基準線已頂高至 <b>${currentTotal}</b> 分。建議尋找替代低位盤口切入。`;
-
+                verdictDesc.innerHTML = `<b>量化理由：</b> 美金大資金盤口突破達 ${deltaTotal}。建議搭配替代盤口買進降階的 <b>「${currentTotal - 0.5} 大」</b>。`;
             } else if (totalSignal === "STEAM_UNDER") {
                 verdictPanel.className = "p-4 rounded-xl border border-sky-500 bg-sky-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-sky-400";
                 verdictTitle.innerHTML = `❄️ 最終推薦：搶進 【 小 分 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 資金正在瘋狂拋售總分數（幅度達到 ${deltaTotal}）。但注意前日有砸小開大的莊家誘盤盲區，下單時千萬不要貪高，請無腦使用替代盤口加防，直接鎖定 <b>「${currentTotal + 0.5} 小」</b> 完美封鎖防守空間。`;
-
-                calibrationText.innerText = "當前觸發【STEAM_UNDER (大資金砸小分)】特徵 -> 歷史統計此盲區容易失準走水";
-                calibrationRating.innerText = "失準避險警告";
-                calibrationRating.className = "bg-rose-500 text-white font-black text-[10px] px-1.5 py-0.5 rounded animate-pulse";
-                guideText.innerHTML = `大資金正在瘋狂砸向低分區。昨日盲區顯示容易整數卡死，請用替代盤口升階防守。`;
-
+                verdictDesc.innerHTML = `<b>量化理由：</b> 資金拋售總分。建議無腦使用替代盤口加防，鎖定 <b>「${currentTotal + 0.5} 小」</b> 完美封鎖。`;
             } else if (deltaML <= -15) {
                 verdictPanel.className = "p-4 rounded-xl border border-amber-500 bg-amber-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-amber-400";
                 verdictTitle.innerHTML = `🏠 最終推薦：獨贏進場 【 主 隊 贏 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 大小分資金無動緊，但美金核心獨贏資金出現異常偏向，主隊賠率大幅下壓達 ${deltaML} 點。莊家已開始封鎖風險，實戰推薦直接下注主隊獨贏（Moneyline）或主隊受讓！`;
-
-                calibrationText.innerText = "當前觸發【獨贏資金傾斜】特徵 -> 市場大資金單邊湧入主隊";
-                calibrationRating.innerText = "獨贏看好";
-                calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-                guideText.innerHTML = `獨贏盤口變動劇烈，主隊勝率在量化模型中被市場資金重新修正提高，適合直接進場主隊獨贏.`;
-
+                verdictDesc.innerHTML = `<b>量化理由：</b> 獨贏資金下壓達 ${deltaML} 點。實戰推薦直接下注主隊獨贏！`;
             } else {
                 verdictPanel.className = "p-4 rounded-xl border border-gray-700 bg-gray-800/20 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-gray-400";
                 verdictTitle.innerHTML = `💤 最終推薦：【 空 倉 觀 望 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 目前大小分變動為 ${deltaTotal}，主隊獨贏變動僅 ${deltaML}。盤口處於死水狀態，昨日復盤顯示此種停滯最容易落入莊家的誘盤盲區。<b>此時不建議買任何大小分或主隊贏！</b> 請耐心等待開賽前 30 分鐘大資金砸盤突破 $\ge 0.5$ 再行動！`;
-
-                calibrationText.innerText = "當前處於【FLAT (盤口平穩)】狀態 -> 前一日統計顯示市場莊家正進行深層平衡誘盤";
-                calibrationRating.innerText = "前日失準校正中";
-                calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-                guideText.innerHTML = `昨日回測發現盤口未動時盲目切入最容易被咬死。今日實戰指南：無突破前一律按兵不動，保全資金。`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 盤口處於死水狀態，極易落入莊家誘盤盲區。建議按兵不動，保全資金！`;
             }
+
+            calibrationText.innerText = "當前狀態 -> 已連結美東日期時間流校正核心";
+            calibrationRating.innerText = "日期通電";
+            calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
+            guideText.innerHTML = `今日實戰指南：請隨時點選上方美東日期按鈕，進行近兩日勝率交叉復盤驗證。`;
 
             const labels = game.history.map(h => h.ts.substring(11,16));
             if(myChart) myChart.destroy();
@@ -265,57 +242,26 @@
                 const dataset = await res.json();
                 tbody.innerHTML = "";
 
-                let maxDelta = 0;
-                let topRecommendedId = null;
                 dataset.forEach(row => {
-                    const absDelta = Math.abs(row.total_changed_delta || 0);
-                    if (absDelta >= 0.5 && absDelta > maxDelta) {
-                        maxDelta = absDelta;
-                        topRecommendedId = row.game_id;
-                    }
-                });
-
-                dataset.forEach(row => {
-                    const isCorePick = (row.game_id === topRecommendedId && maxDelta > 0);
-                    
                     let verifyHtml = "";
                     if(row.total_changed_delta >= 0.5) {
-                        verifyHtml += row.closing_total_result === "OVER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 大分精準</div>` : `<div class="text-rose-400 mb-1">❌ 大分失準 (砸大開小)</div>`;
+                        verifyHtml += row.closing_total_result === "OVER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 大分精準</div>` : `<div class="text-rose-400 mb-1">❌ 大分失準</div>`;
                     } else if(row.total_changed_delta <= -0.5) {
-                        verifyHtml += row.closing_total_result === "UNDER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 小分精準</div>` : `<div class="text-rose-400 mb-1">❌ 小分失準 (砸小開大)</div>`;
+                        verifyHtml += row.closing_total_result === "UNDER" ? `<div class="text-emerald-400 font-bold mb-1">🎯 小分精準</div>` : `<div class="text-rose-400 mb-1">❌ 小分失準</div>`;
                     }
-
-                    if (row.ml_winner_result === "HOME") {
-                        verifyHtml += `<div class="text-amber-400 text-[11px]">🏠 主隊贏盤</div>`;
-                    } else if (row.ml_winner_result === "AWAY") {
-                        verifyHtml += `<div class="text-slate-400 text-[11px]">✈️ 客隊贏盤</div>`;
-                    }
-
-                    if (verifyHtml === "") {
-                        verifyHtml = `<span class="text-gray-600">💤 無顯著訊號</span>`;
-                    }
+                    if (row.ml_winner_result === "HOME") verifyHtml += `<div class="text-amber-400 text-[11px]">🏠 主隊贏盤</div>`;
+                    else if (row.ml_winner_result === "AWAY") verifyHtml += `<div class="text-slate-400 text-[11px]">✈️ 客隊贏盤</div>`;
 
                     const tr = document.createElement("tr");
-                    tr.className = `border-b border-gray-800/60 hover:bg-gray-900/40 transition-all ${isCorePick ? 'premium-recommend' : ''}`;
-                    
+                    tr.className = `border-b border-gray-800/60 hover:bg-gray-900/40 transition-all`;
                     tr.innerHTML = `
                         <td class="p-3">
-                            ${isCorePick ? '<div class="text-[10px] text-amber-400 font-black mb-1 flex items-center gap-1">👑 昨晚核心優質最推</div>' : ''}
                             <div class="font-bold text-white">${row.away} VS ${row.home}</div>
                             <div class="text-[10px] text-gray-500 font-normal">${row.commence_time.substring(5,16).replace('T',' ')}</div>
                         </td>
-                        <td class="p-3 text-gray-400">
-                            初大小: <b>${row.opening_total||'--'}</b> -> 終: <b>${row.closing_total||'--'}</b><br>
-                            初主ML: <b>${row.opening_ml_home||'--'}</b> -> 終: <b>${row.closing_ml_home||'--'}</b>
-                        </td>
-                        <td class="p-3 font-mono leading-relaxed">
-                            <span class="text-sky-400 font-bold">大小變動: ${row.total_changed_delta > 0 ? '+'+row.total_changed_delta : row.total_changed_delta}</span><br>
-                            <span class="text-amber-500 font-bold">主ML終盤: ${row.closing_ml_home||'--'}</span>
-                        </td>
-                        <td class="p-3">
-                            <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded font-black text-sm">${row.final_away_score} : ${row.final_home_score}</span>
-                            <div class="text-[10px] text-gray-400 mt-1">總分: ${row.final_total_score}</div>
-                        </td>
+                        <td class="p-3 text-gray-400">初大小: <b>${row.opening_total||'--'}</b> -> 終: <b>${row.closing_total||'--'}</b></td>
+                        <td class="p-3 font-mono text-sky-400 font-bold">大小變動: ${row.total_changed_delta}</td>
+                        <td class="p-3 text-emerald-400 font-black text-sm">${row.final_away_score} : ${row.final_home_score}</td>
                         <td class="p-3 space-y-1">${verifyHtml}</td>
                     `;
                     tbody.appendChild(tr);
@@ -324,9 +270,6 @@
                 tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-red-400">❌ 載入失敗</td></tr>`;
             }
         }
-
-        loadDashboard();
-        setInterval(loadDashboard, 5 * 60 * 1000);
     </script>
 </body>
 </html>
