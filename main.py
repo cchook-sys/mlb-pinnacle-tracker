@@ -12,7 +12,8 @@ import certifi
 
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
-BOOKMAKER    = "pinnacle"
+# 💡 核心降階防線：優先判定 pinnacle，若免費 API 延遲，自動調用 betonlineag 或 bovada 填補空窗
+BOOKMAKERS   = ["pinnacle", "betonlineag", "bovada"]
 MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
@@ -31,7 +32,7 @@ except Exception as e:
 async def fetch_and_store():
     if not ODDS_API_KEY:
         return []
-    url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
+    url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&oddsFormat={ODDS_FORMAT}"
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
@@ -39,9 +40,16 @@ async def fetch_and_store():
                 return []
             games = res.json()
             ts    = int(time.time())
+            stored = 0
 
             for game in games:
-                pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
+                # 💡 輪詢尋找當前有放盤的備援大資金美金盤
+                pin = None
+                for bm_key in BOOKMAKERS:
+                    pin = next((b for b in game.get("bookmakers", []) if b["key"] == bm_key), None)
+                    if pin:
+                        break
+                
                 if not pin:
                     continue
 
@@ -63,8 +71,10 @@ async def fetch_and_store():
                     "ml_home":      ml_home["price"] if ml_home else None,
                 }
                 
-                # 💡 暴力強制注入：只要來造血，直接寫入，確保清空資料庫後一秒滿血！
+                # 暴力硬塞注入，徹底盤活清空後的資料庫空窗
                 snaps_col.insert_one(snap)
+                stored += 1
+            print(f"Stored {stored} live snapshots.")
             return games
     except Exception as e:
         print(f"Fetch failed: {e}")
@@ -139,6 +149,7 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
+            # 48小時滾動刪除，防止爆艙
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -169,11 +180,11 @@ app.add_middleware(
 
 @app.get("/games")
 async def get_games():
-    # 現場強制抓取，不比對直接寫入，打通最後阻礙
+    # 現場呼叫同步
     await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    # 取消任何可能卡死今天下午場次的時間窗，直接往後推 48 小時內已開盤的所有活水賽事全出
+    # 放寬時間窗：從 12 小時前到未來 48 小時內所有開盤比賽通通打包回傳！
     start_filter = (now - timedelta(hours=12)).isoformat()
     end_filter = (now + timedelta(hours=48)).isoformat()
     
