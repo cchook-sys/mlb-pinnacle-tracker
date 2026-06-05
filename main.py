@@ -1,5 +1,5 @@
 """
-MLB Pinnacle 盤口監控與賽果結算後端 (大數據永久留存完全體)
+MLB Pinnacle 盤口監控與賽果結算後端 (大數據永久留存完全體 V4)
 - 永久留存：修正對答案邏輯，賽果完賽結算後永久留存不覆蓋，資料越滾越多
 - 強制造血：/games 路由現場直連 odds 抓取未來 48 小時場次，突破 Render 睡眠限制
 - 完全防禦：內建全域標準 jsonify 打包，徹底根除前端 CORS 載入失敗報錯
@@ -16,7 +16,7 @@ import pymongo
 import certifi
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # 開放全網域安全連線
 
 # ── Config ────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
@@ -112,16 +112,18 @@ def fetch_and_settle_results_job():
             last = snaps[-1] if snaps else {}
 
             ml_winner = "HOME" if home_score > away_score else "AWAY"
-            opening_total = first.get("total") if first else last.get("total", 0)
-            closing_total = last.get("total") if last else 0
+            
+            # 💡 無快照強制補償防禦：如果缺少快照，自動將賽果終盤或基數數據填入，杜絕歷史頁面的空白與 --
+            opening_total = first.get("total") if first.get("total") is not None else (last.get("total") if last.get("total") is not None else 0)
+            closing_total = last.get("total") if last.get("total") is not None else opening_total
 
             opening_total_result = "PUSH"
-            if opening_total:
+            if opening_total > 0:
                 if total_outcome_score > opening_total: opening_total_result = "OVER"
                 elif total_outcome_score < opening_total: opening_total_result = "UNDER"
 
             closing_total_result = "PUSH"
-            if closing_total:
+            if closing_total > 0:
                 if total_outcome_score > closing_total: closing_total_result = "OVER"
                 elif total_outcome_score < closing_total: closing_total_result = "UNDER"
 
@@ -134,7 +136,7 @@ def fetch_and_settle_results_job():
                 "away_score": away_score,
                 "total_score": total_outcome_score,
                 "ml_winner": ml_winner,
-                "opening_total": opening_total if opening_total else closing_total,
+                "opening_total": opening_total,
                 "closing_total": closing_total,
                 "opening_total_result": opening_total_result,
                 "closing_total_result": closing_total_result,
@@ -175,8 +177,8 @@ def get_games():
             latest = snaps_sorted[-1]
             first  = snaps_sorted[0]
 
-            total_delta = round(float(latest.get("total", 0)) - float(first.get("total", 0)), 2) if (latest.get("total") and first.get("total")) else 0
-            ml_home_delta = int(latest.get("ml_home", 0)) - int(first.get("ml_home", 0)) if (latest.get("ml_home") and first.get("ml_home")) else 0
+            total_delta = round(float(latest.get("total", 0)) - float(first.get("total", 0)), 2) if (latest.get("total") is not None and first.get("total") is not None) else 0
+            ml_home_delta = int(latest.get("ml_home", 0)) - int(first.get("ml_home", 0)) if (latest.get("ml_home") is not None and first.get("ml_home") is not None) else 0
 
             result.append({
                 "game_id":       gid,
@@ -213,8 +215,8 @@ def get_training_dataset():
                 "home": r["home"],
                 "away": r["away"],
                 "commence_time": r["commence_time"],
-                "opening_total": open_t if open_t else close_t,
-                "closing_total": close_t,
+                "opening_total": r.get("opening_total") if r.get("opening_total") else r.get("closing_total"),
+                "closing_total": r.get("closing_total"),
                 "total_changed_delta": delta_t,
                 "opening_ml_home": r.get("opening_ml_home"),
                 "closing_ml_home": r.get("closing_ml_home"),
@@ -230,7 +232,7 @@ def get_training_dataset():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
-def root(): return jsonify({"status": "ok", "engine": "MLB Live-Flush Core V3"})
+def root(): return jsonify({"status": "ok", "engine": "MLB BigData Guard V4"})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
