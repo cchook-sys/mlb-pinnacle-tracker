@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-<body class="bg-black text-white p-8">
-    <h1 id="status">正在偵錯中...</h1>
+<head><meta charset="UTF-8"><title>Debug Tracker</title></head>
+<body class="bg-black text-white p-4">
+    <h1 class="text-xl">即時數據偵錯區</h1>
     <pre id="debug" class="text-xs text-green-400"></pre>
     <script>
         fetch("https://mlb-pinnacle-tracker.onrender.com/games")
             .then(r => r.json())
             .then(d => {
-                document.getElementById("status").innerText = "資料已回傳:";
                 document.getElementById("debug").innerText = JSON.stringify(d, null, 2);
             });
     </script>
