@@ -15,14 +15,12 @@
 <body class="p-2 md:p-8">
 
     <div class="max-w-7xl mx-auto">
-        <!-- Header -->
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-6 gap-4">
             <div>
                 <h1 class="text-xl md:text-3xl font-extrabold text-white tracking-tight flex items-center flex-wrap gap-2">
                     ⚾ MLB Pinnacle 數據量化
                     <span class="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">🟢 已連線</span>
-                    <!-- 💡 核心修正：直接秀出現在台灣本地時間 -->
-                    <span id="tw-clock" class="text-xs bg-slate-800 text-sky-400 px-3 py-1 rounded-full border border-slate-700 font-mono font-bold tracking-wider">🕒 台灣現在時間: --/-- --:--:--</span>
+                    <span id="tw-clock" class="text-xs bg-slate-800 text-emerald-400 px-3 py-1 rounded-full border border-slate-700 font-mono font-bold tracking-wider">🕒 資料最後更新時間: --/-- --:--:--</span>
                 </h1>
             </div>
             
@@ -32,7 +30,6 @@
             </div>
         </div>
 
-        <!-- 模式 1: 即時看盤 -->
         <div id="live-view" class="grid grid-cols-12 gap-6">
             <div class="col-span-12 md:col-span-5 space-y-2 max-h-[80vh] overflow-y-auto pr-1" id="games-list">
                 <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入大聯盟最新已放盤賽事...</div>
@@ -82,7 +79,6 @@
             </div>
         </div>
 
-        <!-- 模式 2: 歷史對答案 -->
         <div id="history-view" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-4 overflow-x-auto">
             <table class="w-full text-left border-collapse font-mono text-xs">
                 <thead>
@@ -104,19 +100,6 @@
         let fetchedGames = [];
         let myChart = null;
 
-        // 每秒更新台灣現在時間電子鐘
-        function startClock() {
-            setInterval(() => {
-                const now = new Date();
-                const month = String(now.getMonth() + 1).padStart(2, '0');
-                const date = String(now.getDate()).padStart(2, '0');
-                const hours = String(now.getHours()).padStart(2, '0');
-                const minutes = String(now.getMinutes()).padStart(2, '0');
-                const seconds = String(now.getSeconds()).padStart(2, '0');
-                document.getElementById("tw-clock").innerText = `🕒 台灣現在時間: ${month}/${date} ${hours}:${minutes}:${seconds}`;
-            }, 1000);
-        }
-
         function formatDualTime(utcStr) {
             try {
                 const dateObj = new Date(utcStr);
@@ -129,7 +112,6 @@
         }
 
         window.addEventListener('DOMContentLoaded', () => {
-            startClock();
             loadDashboard();
         });
 
@@ -159,7 +141,14 @@
         async function loadDashboard() {
             try {
                 const res = await fetch(`${API_BASE}/games?nocache=${Date.now()}`);
-                fetchedGames = await res.json();
+                const parsedPayload = await res.json();
+                
+                // 💡 核心修正：對齊後端拋出的更新對時時間
+                if(parsedPayload.system_updated_at){
+                    document.getElementById("tw-clock").innerText = `🕒 資料最後更新時間: ${parsedPayload.system_updated_at}`;
+                }
+                
+                fetchedGames = parsedPayload.data;
                 const container = document.getElementById("games-list");
                 container.innerHTML = "";
 
@@ -244,7 +233,7 @@
                 verdictDesc.innerHTML = `<b>量化理由：</b> 盤口處於平穩死水狀態，此時盲目切入極易被莊家咬死，建議耐心按兵不動。`;
             }
 
-            calibrationText.innerText = "當前狀態 -> 異步數據活水機制已同步通電運作中";
+            calibrationText.innerText = "當前狀態 -> 現場自造血功能已全天候強制打通";
             calibrationRating.innerText = "即時刷新";
             calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
             guideText.innerHTML = `👉 <b>實戰風控：</b> 請依照左側顯示的台灣本地開賽時間對時，鎖定開賽前 30 分鐘大資金砸盤信號再進場。`;
