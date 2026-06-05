@@ -28,14 +28,13 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-# 💡 核心工具：將 UTC 時間字串轉換為美東時間的「YYYY-MM-DD」日期字串
-def convert_utc_to_est_date(utc_str: str) -> str:
+# 💡 精密轉換：將 UTC 時間轉換為美東日期 (EDT夏令時間一般為 UTC-4)
+def get_est_date_string(utc_str: str) -> str:
     try:
-        # 移除結尾的 Z 並解析
         clean_ts = utc_str.replace("Z", "")
         dt_utc = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
-        # 美東標準時間為 UTC - 5 小時 (此處採用 -5 固定時區防範夏令時間跳動錯亂)
-        dt_est = dt_utc.astimezone(timezone(timedelta(hours=-5)))
+        # 對齊美職慣用夏令時間，採用 UTC-4 進行日期切分
+        dt_est = dt_utc.astimezone(timezone(timedelta(hours=-4)))
         return dt_est.strftime("%Y-%m-%d")
     except:
         return ""
@@ -143,9 +142,9 @@ async def fetch_and_settle_results():
                     "total_score": total_outcome_score,
                     "ml_winner": ml_winner,                
                     "opening_total": opening_total,         
-                    "opening_total_result": opening_total_result,
-                    "closing_total": closing_total,         
-                    "closing_total_result": closing_total_result,
+                    "opening_total_result": opening_total_result, 
+                    "closing_total": closing_total,          
+                    "closing_total_result": closing_total_result, 
                     "opening_ml_home": first_snap.get("ml_home"),
                     "closing_ml_home": last_snap.get("ml_home"),
                     "updated_at": datetime.now(timezone.utc).isoformat()
@@ -153,11 +152,11 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 💡 【自動滾動刪除過期資料】維持精簡 2 天數據
+            # 48小時滾動自動清除過期資料
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-            print(f"Settle finished. Added {settled_count} rows. Overdated rows cleaned.")
+            print(f"Settle finished. Added {settled_count} rows.")
     except Exception as e:
         print(f"Settle failed: {e}")
 
@@ -182,21 +181,18 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# ── 💡 路由 1：依據「美東日期」獲取即時看盤 ────────────────────────────────────
 @app.get("/games")
 async def get_games(date: str = Query(None, description="美東日期 YYYY-MM-DD")):
-    # 如果前端沒傳日期，自動計算當下的美東日期作為預設值
     if not date:
-        est_now = datetime.now(timezone.utc) - timedelta(hours=5)
+        # 預設對齊當前美東夏令時間
+        est_now = datetime.now(timezone.utc) - timedelta(hours=4)
         date = est_now.strftime("%Y-%m-%d")
 
-    # 撈取所有快照紀錄
     all_snaps = list(snaps_col.find({}, {"_id": 0}))
     games = {}
     
     for s in all_snaps:
-        # 將比賽時間轉換為美東日期進行比對過濾
-        g_est_date = convert_utc_to_est_date(s.get("commence_time", ""))
+        g_est_date = get_est_date_string(s.get("commence_time", ""))
         if g_est_date == date:
             gid = s["game_id"]
             if gid not in games:
