@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板 - 實戰下單終極版</title>
+    <title>MLB Pinnacle 數據量化儀表板 - 終極完全體</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -228,7 +228,7 @@
                 calibrationText.innerText = "當前觸發【獨贏資金傾斜】特徵 -> 市場大資金單邊湧入主隊";
                 calibrationRating.innerText = "獨贏看好";
                 calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-                guideText.innerHTML = `獨贏盤口變動劇烈，主隊勝率在量化模型中被市場資金重新修正提高，適合直接進場主隊獨贏。`;
+                guideText.innerHTML = `獨贏盤口變動劇烈，主隊勝率在量化模型中被市場資金重新修正提高，適合直接進場主隊獨贏.`;
 
             } else {
                 verdictPanel.className = "p-4 rounded-xl border border-gray-700 bg-gray-800/20 flex flex-col gap-1.5 font-sans shadow-lg";
@@ -275,7 +275,6 @@
                     }
                 });
 
-                // 💡 順應後端降序排序，直接讀取
                 dataset.forEach(row => {
                     const isCorePick = (row.game_id === topRecommendedId && maxDelta > 0);
                     
