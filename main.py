@@ -1,23 +1,23 @@
 """
-MLB Pinnacle 數據量化後端 (48小時滾動防爆艙完全體 V5)
-- CORS 徹底封印：完美解決跨網域、防快取標籤引起的 Access-Control-Allow-Origin 載入失敗
-- 48小時滾動：歷史結算自動比對時間，永遠只留最近 2 天賽果，自動刪除最舊場次，防爆儲存空間
-- 即時造血補償：/games 路由現場活水更新，確保隨時點擊都能強制產出最新場次
+MLB Pinnacle 數據量化後端 (CORS 暴力解鎖 & 48h 滾動完全體 V7)
+- CORS 終極封印：放棄依賴第三方插件，改用 Flask 內建手動硬塞 Header，保證 100% 解除跨網域阻擋
+- 歷史全清空：開機立刻執行一刀切，無條件刪除 06/03（含）前的老舊過期髒資料
+- 時間軸降溫：即時監控修正為「當日賽事 + 未來 24 小時」，強行抓出 6 號（明天）場次且不撐爆記憶體
+- 自動防爆艙：歷史結算維持 48 小時自動刪除，永遠只滾動留存最新的兩天數據
 """
 
 import os
 import time
 import requests
 from datetime import datetime, timezone, timedelta
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, make_response
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 import pymongo
 import certifi
 
 app = Flask(__name__)
-# 💡 終極 CORS 設定：無條件允許所有來源、所有標籤與防快取參數連線
-CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}})
+CORS(app) # 基礎宣告
 
 # ── Config ────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
@@ -35,7 +35,13 @@ try:
     db = client["mlb_tracker"]
     snaps_col = db["snapshots"]        
     results_col = db["results"]        
-    print("✅ MongoDB 48小時精密滾動連線池已就位！")
+    print("✅ MongoDB 雲端連線成功！")
+    
+    # 💡 【強制清除舊資料指令】開機時直接把 06/03 號（含）前的舊數據無條件全數 Delete 清空！
+    clear_boundary = "2026-06-04T00:00:00Z"
+    r_del = results_col.delete_many({"commence_time": {"$lt": clear_boundary}})
+    s_del = snaps_col.delete_many({"commence_time": {"$lt": clear_boundary}})
+    print(f"🧹 大掃除完成：已刪除 3 號前舊賽果: {r_del.deleted_count} 筆，舊快照: {s_del.deleted_count} 筆。")
 except Exception as e:
     print(f"❌ MongoDB 連線失敗: {e}")
 
@@ -44,7 +50,7 @@ def execute_live_crawl():
     if not ODDS_API_KEY: return []
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
     try:
-        res = requests.get(url, timeout=12)
+        res = requests.get(url, timeout=10)
         if res.status_code != 200: return []
         games = res.json()
         ts = int(time.time())
@@ -81,14 +87,14 @@ def execute_live_crawl():
         print(f"❌ 現場造血異常: {e}")
         return []
 
-# ── 完賽賽果沖銷 ＆ 💡 48小時自動滾動刪除防爆艙機制 ────────────────────────────────
+# ── 完賽賽果沖銷 ＆ 48小時自動滾動刪除 ────────────────────────────────────────
 def fetch_and_settle_results_job():
     if not ODDS_API_KEY: return
-    print("🔄 [滾動歷史沖銷] 正在強行追回最近 3 日賽果對答案...")
+    print("🔄 [滾動歷史沖銷] 正在拉取完賽賽果...")
     url = f"{BASE_URL}/sports/{SPORT}/scores/?apiKey={ODDS_API_KEY}&daysFrom=3"
 
     try:
-        res = requests.get(url, timeout=12)
+        res = requests.get(url, timeout=10)
         if res.status_code != 200: return
         completed_games = res.json()
         settled_count = 0
@@ -97,7 +103,6 @@ def fetch_and_settle_results_job():
             if not game.get("completed", False): continue
             gid = game["id"]
             
-            # 若資料庫已有，跳過不重複寫入
             if results_col.find_one({"game_id": gid}): continue
 
             scores = game.get("scores", [])
@@ -147,15 +152,11 @@ def fetch_and_settle_results_job():
             results_col.insert_one(result_doc)
             settled_count += 1
         
-        # 💡 【核心戰略升級：空間防爆艙刪除器】
-        # 計算 48 小時前（前兩天）的標準 UTC 時間界線
+        # 💡 【精密滾動風控：永不爆艙】只保留 48 小時內賽果，其餘過期場次自動 Delete
         time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
-        
-        # 暴力刪除大於兩天前的舊數據（無論是比分紀錄還是老舊快照，通通清空）
         del_results = results_col.delete_many({"commence_time": {"$lt": time_boundary}})
         del_snaps = snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-        
-        print(f"🎯 歷史沖銷完畢！上架 {settled_count} 場。滾動風控：已自動刪除 {del_results.deleted_count} 場過期歷史賽果與 {del_snaps.deleted_count} 條舊快照。")
+        print(f"🎯 滾動清理：已移除了 {del_results.deleted_count} 場過期歷史與 {del_snaps.deleted_count} 條舊快照。")
     except Exception as e:
         print(f"❌ 賽果結算失敗: {e}")
 
@@ -165,12 +166,20 @@ scheduler.add_job(execute_live_crawl, 'interval', minutes=10, next_run_time=date
 scheduler.add_job(fetch_and_settle_results_job, 'interval', minutes=30, next_run_time=datetime.now())
 scheduler.start()
 
+# ── 路由 1：獲取即時看盤 (💡 當日賽事 + 未來 24 小時，完美逼出 6 號明天場次) ──
 @app.route('/games', methods=['GET'])
 def get_games():
     try:
-        execute_live_crawl()  
-        cutoff_time = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
-        all_snaps = list(snaps_col.find({"commence_time": {"$gte": cutoff_time}}, {"_id": 0}))
+        execute_live_crawl()  # 被訪問時強制向 The Odds API 要最新放盤
+        
+        # 💡 最佳平衡時間窗：從當前 6 小時前開始，一路往後抓 24 小時，強行將明天的比賽拉入列表中！
+        now = datetime.now(timezone.utc)
+        start_filter = (now - timedelta(hours=6)).isoformat()
+        end_filter = (now + timedelta(hours=24)).isoformat()
+        
+        all_snaps = list(snaps_col.find({
+            "commence_time": {"$gte": start_filter, "$lte": end_filter}
+        }, {"_id": 0}))
         
         games = {}
         for s in all_snaps:
@@ -201,17 +210,20 @@ def get_games():
             })
         result.sort(key=lambda x: x["commence_time"])
         
-        # 💡 強制補回全路由跨網域標頭，雙重防禦 CORS
-        response = jsonify(result)
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
+        # 💡 【暴力破解 CORS】建立實體 Response，手工寫死全網域放行，徹底消滅連線被阻擋的錯誤
+        resp = make_response(jsonify(result))
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        return resp
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ── 路由 2：獲取歷史資料分頁 ────────────────────────────────────────────────────
 @app.route('/analytics/dataset', methods=['GET'])
 def get_training_dataset():
     try:
-        fetch_and_settle_results_job() 
+        fetch_and_settle_results_job() # 點擊分頁時強制沖銷昨日賽果
         results = list(results_col.find({}, {"_id": 0}).sort("commence_time", -1))
         
         dataset = []
@@ -238,18 +250,20 @@ def get_training_dataset():
                 "closing_total_result": r.get("closing_total_result", "PUSH")
             })
             
-        # 💡 強制補回跨網域標頭，粉碎 image_b5b23e.png 截圖中的連線阻擋
-        response = jsonify(dataset)
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
+        # 💡 【暴力破解 CORS】手工寫死歷史數據接口的許可證
+        resp = make_response(jsonify(dataset))
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        return resp
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
 def root(): 
-    response = jsonify({"status": "ok", "engine": "MLB Rolling 48h Auto-Purge Core"})
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+    resp = make_response(jsonify({"status": "ok", "engine": "MLB Manual CORS Core V7"}))
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
