@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板 - 美東日期版</title>
+    <title>MLB Pinnacle 數據量化儀表板 - 美東日期完全體</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -23,24 +23,24 @@
                 </h1>
             </div>
             
-            <div class="flex items-center gap-4 w-full md:w-auto">
-                <div class="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg">
-                    <span class="text-xs text-amber-400 font-bold">📅 美東日期:</span>
+            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+                <div class="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg shadow-inner">
+                    <span class="text-xs text-amber-400 font-black">📅 美東日期:</span>
                     <input type="date" id="est-date-picker" onchange="loadDashboard()" class="bg-transparent text-white text-sm font-bold font-mono focus:outline-none cursor-pointer">
                 </div>
                 <div class="flex gap-2">
-                    <button id="btn-live" onclick="switchMode('live')" class="tab-active border border-gray-800 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer">🔥 即時監控看盤</button>
-                    <button id="btn-history" onclick="switchMode('history')" class="bg-gray-900 border border-gray-800 text-gray-400 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer hover:text-white">📊 昨日歷史結算分析</button>
+                    <button id="btn-live" onclick="switchMode('live')" class="tab-active border border-gray-800 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer transition-colors">🔥 即時監控看盤</button>
+                    <button id="btn-history" onclick="switchMode('history')" class="bg-gray-900 border border-gray-800 text-gray-400 px-4 py-2 rounded-lg text-sm font-bold cursor-pointer hover:text-white transition-colors">📊 昨日歷史結算分析</button>
                 </div>
             </div>
         </div>
 
         <div id="live-view" class="grid grid-cols-12 gap-6">
-            <div class="col-span-5 space-y-2 max-h-[85vh] overflow-y-auto pr-1" id="games-list">
-                <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入該美東日期的盤口...</div>
+            <div class="col-span-12 md:col-span-5 space-y-2 max-h-[80vh] overflow-y-auto pr-1" id="games-list">
+                <div class="text-center py-12 text-xs text-gray-500">🔄 正在同步該美東日期的最新盤口...</div>
             </div>
             
-            <div class="col-span-7 bg-gray-900/50 border border-gray-800 rounded-xl p-6 max-h-[85vh] overflow-y-auto sticky top-4" id="chart-container">
+            <div class="col-span-12 md:col-span-7 bg-gray-900/50 border border-gray-800 rounded-xl p-6 max-h-[80vh] overflow-y-auto sticky top-4" id="chart-container">
                 <div id="chart-placeholder" class="text-center py-24 text-gray-500">
                     <span class="text-4xl mb-2">📊</span>
                     <p class="text-sm">請點擊左側賽事觀看資金流向折線圖</p>
@@ -102,10 +102,10 @@
         let fetchedGames = [];
         let myChart = null;
 
-        // 💡 頁面初始化：預設自動填入今天的「美東日期」
+        // 💡 自動同步初始化：直接把選擇器預設對齊當前的美東日期
         window.addEventListener('DOMContentLoaded', () => {
-            const estToday = new Date(new Date().getTime() - (5 * 60 * 60 * 1000));
-            document.getElementById('est-date-picker').value = estToday.toISOString().split('T')[0];
+            const estTime = new Date(new Date().getTime() - (5 * 60 * 60 * 1000));
+            document.getElementById('est-date-picker').value = estTime.toISOString().split('T')[0];
             loadDashboard();
         });
 
@@ -140,8 +140,16 @@
                 const container = document.getElementById("games-list");
                 container.innerHTML = "";
 
-                if(!fetchedGames || fetchedGames.length === 0) {
-                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 該美東日期暫無賽事 (請切換到明後天日期查看)</div>`;
+                if (!fetchedGames || fetchedGames.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-12 bg-gray-900/30 rounded-xl border border-gray-800/50 p-4">
+                            <span class="text-3xl block mb-2">📭</span>
+                            <div class="text-white text-sm font-bold mb-1">該美東日期暫無即時監控數據</div>
+                            <div class="text-gray-500 text-xs leading-relaxed">
+                                大聯盟當日賽事尚未開盤，或莊家正在調整賠率。<br>
+                                👉 請切換上方日期至<b>明天或後天</b>查看最新放盤場次！
+                            </div>
+                        </div>`;
                     return;
                 }
 
@@ -153,7 +161,7 @@
                     card.innerHTML = `
                         <div>
                             <div class="flex justify-between items-center mb-1.5">
-                                <span class="text-xs text-gray-500 font-mono">${g.commence_time.substring(5,16).replace('T',' ')} UTC</span>
+                                <span class="text-xs text-gray-500 font-mono">${g.commence_time.substring(11,16)} UTC</span>
                                 ${getCompactBadge(g)}
                             </div>
                             <div class="text-sm font-bold text-white">${g.away} VS ${g.home}</div>
@@ -166,7 +174,7 @@
                     container.appendChild(card);
                 });
             } catch {
-                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 伺服器通訊異常，請稍候重整</div>`;
+                document.getElementById("games-list").innerHTML = `<div class="text-center py-12 text-red-400 text-xs">❌ 數據讀取失敗，請確認 Render 後台是否正常運作。</div>`;
             }
         }
 
@@ -196,28 +204,28 @@
                 verdictPanel.className = "p-4 rounded-xl border border-rose-500 bg-rose-500/10 flex flex-col gap-1.5 font-sans shadow-lg animate-pulse";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-rose-400";
                 verdictTitle.innerHTML = `🔥 最終推薦：搶進 【 大 分 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 美金大資金盤口突破達 ${deltaTotal}。建議搭配替代盤口買進降階的 <b>「${currentTotal - 0.5} 大」</b>。`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 大資金強力突破達 ${deltaTotal}。建議使用替代盤口買進降階的 <b>「${currentTotal - 0.5} 大」</b> 進行安全對沖。`;
             } else if (totalSignal === "STEAM_UNDER") {
                 verdictPanel.className = "p-4 rounded-xl border border-sky-500 bg-sky-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-sky-400";
                 verdictTitle.innerHTML = `❄️ 最終推薦：搶進 【 小 分 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 資金拋售總分。建議無腦使用替代盤口加防，鎖定 <b>「${currentTotal + 0.5} 小」</b> 完美封鎖。`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 資金正在瘋狂拋售總分數。建議利用替代盤口加防，直接鎖定 <b>「${currentTotal + 0.5} 小」</b>。`;
             } else if (deltaML <= -15) {
                 verdictPanel.className = "p-4 rounded-xl border border-amber-500 bg-amber-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-amber-400";
                 verdictTitle.innerHTML = `🏠 最終推薦：獨贏進場 【 主 隊 贏 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 獨贏資金下壓達 ${deltaML} 點。實戰推薦直接下注主隊獨贏！`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 獨贏資金出現異常下壓達 ${deltaML} 點。實戰推薦直接進場主隊獨贏或主隊受讓。`;
             } else {
                 verdictPanel.className = "p-4 rounded-xl border border-gray-700 bg-gray-800/20 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-gray-400";
                 verdictTitle.innerHTML = `💤 最終推薦：【 空 倉 觀 望 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 盤口處於死水狀態，極易落入莊家誘盤盲區。建議按兵不動，保全資金！`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 盤口死水狀態，昨日盲區復盤顯示此種停滯極易落入莊家獵殺區。<b>此時不建議買任何大小分或主隊贏！</b>`;
             }
 
-            calibrationText.innerText = "當前狀態 -> 已連結美東日期時間流校正核心";
-            calibrationRating.innerText = "日期通電";
-            calibrationRating.className = "bg-amber-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-            guideText.innerHTML = `今日實戰指南：請隨時點選上方美東日期按鈕，進行近兩日勝率交叉復盤驗證。`;
+            calibrationText.innerText = "當前狀態 -> 已成功對齊美東日期交叉校正核心";
+            calibrationRating.innerText = "日期精準校正中";
+            calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
+            guideText.innerHTML = `👉 <b>今日實戰指南：</b> 盤口未動時千萬別盲信初盤，請鎖定美東日期，觀察臨場前 30 分鐘是否有單邊 Delta 突破。`;
 
             const labels = game.history.map(h => h.ts.substring(11,16));
             if(myChart) myChart.destroy();
