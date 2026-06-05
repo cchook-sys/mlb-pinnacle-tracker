@@ -1,6 +1,7 @@
 """
-MLB Pinnacle 數據量化後端 (FastAPI 穩定回歸乾淨完全體)
-- 100% 經典還原：回歸週二最穩定的 FastAPI 非同步架構，完全杜絕當機與 CORS 連線阻擋
+MLB Pinnacle 數據量化後端 (週二經典 FastAPI 異步穩定完全體)
+- 100% 經典還原：回歸週二最穩定的 FastAPI + httpx 異步架構，消滅連線當機
+- 數據防護：保留去重防禦與智能寫入，確保隔天對答案資料最完整、絕不漏場
 - 當日賽事聚焦：/games 路由只抓前後 12 小時當日賽事，減輕機房負擔
 - 48h 滾動風控：/analytics/dataset 路由會自動刪除大於兩天前的過期歷史，防止免費空間爆艙
 """
@@ -25,7 +26,7 @@ MARKETS      = "h2h,totals,spreads"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Database (MongoDB Atlas) ──────────────────────────────────────────────────
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 try:
@@ -37,7 +38,7 @@ try:
 except Exception as e:
     print(f"❌ MongoDB 連線失敗: {e}")
 
-# ── 智慧盤口抓取 ──────────────────────────────────────────────────────────────
+# ── 智慧盤口抓取與去重儲存 ──────────────────────────────────────────────────────
 async def fetch_and_store():
     if not ODDS_API_KEY:
         return
@@ -88,7 +89,7 @@ async def fetch_and_store():
     except Exception as e:
         print(f"❌ 盤口抓取失敗: {e}")
 
-# ── 完賽賽果結算排程 ──────────────────────────────────────────────────────────
+# ── 完賽賽果結算排程 & 48小時滾動自動刪除 ────────────────────────────────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -169,15 +170,15 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 💡 【精密滾動刪除】自動判定時間，刪除 48 小時前的老舊數據，防止爆空間
+            # 自動判定時間，清空 48 小時前（前兩天）的過期歷史與舊快照
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-            print(f"🎯 昨日賽果結算完畢！新增 {settled_count} 場，過期歷史已自動清空。")
+            print(f"🎯 昨日賽果結算完畢！新增 {settled_count} 場，老舊過期賽事已自動滾動刪除。")
     except Exception as e:
         print(f"❌ 賽果結算失敗: {e}")
 
-# ── 排程設定 ──────────────────────────────────────────────────────────────────
+# ── 排程系統設定 ──────────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
@@ -186,10 +187,11 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
+    print("⏰ 週二異步排程核心完美歸位")
     yield
     scheduler.shutdown()
 
-# ── FastAPI 宣告 ──────────────────────────────────────────────────────────────
+# ── FastAPI App 宣告 ──────────────────────────────────────────────────────────
 app = FastAPI(title="MLB Pinnacle Tracker", lifespan=lifespan)
 
 app.add_middleware(
@@ -205,6 +207,7 @@ app.add_middleware(
 def root():
     return {"status": "ok", "service": "MLB FastAPI Core Clean Version"}
 
+# ── 路由 1：獲取即時看盤 (聚焦當日前後 12 小時賽事) ───────────────────────────
 @app.get("/games")
 async def get_games():
     await fetch_and_store()
@@ -270,6 +273,7 @@ async def get_games():
     result.sort(key=lambda x: x["commence_time"])
     return result
 
+# ── 路由 2：獲取歷史資料分頁 (後端以降序排序) ──────────────────────────────────
 @app.get("/analytics/dataset")
 async def get_training_dataset():
     await fetch_and_settle_results()
