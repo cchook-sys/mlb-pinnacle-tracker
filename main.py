@@ -12,7 +12,7 @@ import certifi
 
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
-BOOKMAKERS   = ["pinnacle", "betonlineag", "bovada"]
+BOOKMAKER    = "pinnacle"
 MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
@@ -28,11 +28,10 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-# 💡 將抓取邏輯獨立出來，方便隨時隨地強制現場造血
-async def execute_live_crawl_core():
+async def fetch_and_store():
     if not ODDS_API_KEY:
         return []
-    url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&oddsFormat={ODDS_FORMAT}"
+    url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
@@ -43,12 +42,7 @@ async def execute_live_crawl_core():
             stored = 0
 
             for game in games:
-                pin = None
-                for bm_key in BOOKMAKERS:
-                    pin = next((b for b in game.get("bookmakers", []) if b["key"] == bm_key), None)
-                    if pin:
-                        break
-                
+                pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
                 if not pin:
                     continue
 
@@ -69,18 +63,13 @@ async def execute_live_crawl_core():
                     "over_juice":   over["price"] if over else None,
                     "ml_home":      ml_home["price"] if ml_home else None,
                 }
-                
-                # 現場無條件注入，打破一切快照死結
                 snaps_col.insert_one(snap)
                 stored += 1
-            print(f"Core crawl successfully stored {stored} snapshots.")
+            print(f"Stored {stored} snapshots.")
             return games
     except Exception as e:
-        print(f"Core crawl failed: {e}")
+        print(f"Fetch failed: {e}")
         return []
-
-async def fetch_and_store_job():
-    await execute_live_crawl_core()
 
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
@@ -161,8 +150,8 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def app_lifespan(app_instance: FastAPI):
-    # 開機時不給 Render 壓力，等連線與時間伺服器穩定
-    scheduler.add_job(fetch_and_store_job, "interval", minutes=10, id="pinnacle_fetch")
+    await fetch_and_store()
+    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
     yield
@@ -179,14 +168,13 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# ── 💡 核心改動：Games 路由改為現場即時撈取，徹底打破重啟快取 ─────────────────
 @app.get("/games")
 async def get_games():
-    # 網頁一被讀取，立刻現場強行連線 odds API 抓取最新活水，補償開機時差的落空！
-    await execute_live_crawl_core()
+    # 現場強制作業造血
+    await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    # 時間窗完美放開：前後各包攬今明兩天所有盤口
+    # 放寬過濾窗：完美吐出未來兩天所有已放盤場次
     start_filter = (now - timedelta(hours=12)).isoformat()
     end_filter = (now + timedelta(hours=48)).isoformat()
     
