@@ -16,6 +16,7 @@
 <body class="p-2 md:p-8">
 
     <div class="max-w-7xl mx-auto">
+        <!-- Header -->
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 mb-8 gap-4">
             <div>
                 <h1 class="text-xl md:text-3xl font-extrabold text-white tracking-tight flex items-center flex-wrap gap-2">
@@ -31,6 +32,7 @@
             </div>
         </div>
 
+        <!-- 模式 1: 即時看盤 -->
         <div id="live-view" class="grid grid-cols-12 gap-6">
             <div class="col-span-5 space-y-2 max-h-[85vh] overflow-y-auto pr-1" id="games-list">
                 <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入即時大數據盤口...</div>
@@ -50,12 +52,14 @@
                         </div>
                     </div>
 
+                    <!-- 實戰最終下單推薦大看板 -->
                     <div id="final-verdict-panel" class="p-4 rounded-xl border flex flex-col gap-1.5 font-sans shadow-lg">
                         <div class="text-[11px] text-gray-400 font-bold uppercase tracking-wider">🎯 大數據量化・實戰最終下單推薦</div>
                         <div id="final-verdict-title" class="text-xl md:text-2xl font-black tracking-wide">--</div>
                         <div id="final-verdict-desc" class="text-xs text-gray-300 leading-relaxed font-medium mt-0.5">--</div>
                     </div>
 
+                    <!-- 大數據歷史勝率特蹤動態校正面板 -->
                     <div id="feedback-calibration-panel" class="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <span class="text-xl">📊</span>
@@ -67,6 +71,7 @@
                         <span id="calibration-rating" class="font-black text-[10px] px-1.5 py-0.5 rounded">--</span>
                     </div>
 
+                    <!-- 實戰智能下單替代防禦指南 -->
                     <div id="betting-guide-panel" class="bg-sky-500/10 border border-sky-500/20 p-3 rounded-lg font-mono">
                         <div class="text-sky-400 text-xs font-black flex items-center gap-1 mb-1">⚡ 實戰盤口風控下單指引</div>
                         <div id="betting-guide-text" class="text-white text-[11px] leading-relaxed">--</div>
@@ -77,6 +82,7 @@
             </div>
         </div>
 
+        <!-- 模式 2: 歷史對答案 -->
         <div id="history-view" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-4 overflow-x-auto">
             <table class="w-full text-left border-collapse font-mono text-xs">
                 <thead>
@@ -138,7 +144,6 @@
 
         async function loadDashboard() {
             try {
-                // 💡 加入隨機時間戳防快取標籤，強迫 Render 吐出 48 小時內新快照
                 const res = await fetch(`${API_BASE}/games?nocache=${Date.now()}`);
                 fetchedGames = await res.json();
                 const container = document.getElementById("games-list");
@@ -262,7 +267,6 @@
             const tbody = document.getElementById("history-table-body");
             tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-500">🔄 正在加載歷史對答案大數據...</td></tr>`;
             try {
-                // 💡 歷史對答案也加上隨機時間戳，強迫打破跨網域舊快取限制
                 const res = await fetch(`${API_BASE}/analytics/dataset?nocache=${Date.now()}`);
                 const dataset = await res.json();
                 tbody.innerHTML = "";
