@@ -1,93 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { background-color: #0d1117; color: #c9d1d9; }
-        .card-active { border-color: #38bdf8; box-shadow: 0 0 15px rgba(56, 189, 248, 0.2); }
-        .tab-active { background-color: #1e293b; border-color: #38bdf8; color: #fff; }
-    </style>
-</head>
-<body class="p-2 md:p-8">
-    <div class="max-w-7xl mx-auto">
-        <div class="flex flex-col md:flex-row justify-between items-center border-b border-gray-800 pb-4 mb-6">
-            <h1 class="text-xl md:text-3xl font-extrabold text-white">⚾ MLB Pinnacle 數據量化
-                <span class="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">🟢 已連線</span>
-                <span id="tw-clock" class="text-xs text-emerald-400 font-mono font-bold">🕒 最後更新: --:--:--</span>
-            </h1>
-        </div>
-
-        <div id="live-view" class="grid grid-cols-12 gap-6">
-            <div class="col-span-12 md:col-span-5 space-y-2 max-h-[80vh] overflow-y-auto" id="games-list">
-                <div class="text-center py-12 text-xs text-gray-500">🔄 正在同步數據...</div>
-            </div>
-            <div class="col-span-12 md:col-span-7 bg-gray-900/50 border border-gray-800 rounded-xl p-6" id="chart-container">
-                <div id="chart-placeholder" class="text-center py-24 text-gray-500">請點擊左側賽事觀看折線圖</div>
-                <div id="chart-content" class="hidden space-y-4">
-                    <h2 id="selected-matchup" class="text-lg font-bold text-white">---</h2>
-                    <div class="relative w-full h-[240px]"><canvas id="historyChart"></canvas></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
+<body class="bg-black text-white p-8">
+    <h1 id="status">正在偵錯中...</h1>
+    <pre id="debug" class="text-xs text-green-400"></pre>
     <script>
-        const API_BASE = "https://mlb-pinnacle-tracker.onrender.com";
-        let fetchedGames = [];
-        let myChart = null;
-
-        async function loadDashboard() {
-            try {
-                const res = await fetch(`${API_BASE}/games?nocache=${Date.now()}`);
-                const response = await res.json();
-                
-                // 💡 關鍵修正：解析後端回傳的 { system_updated_at: "...", data: [...] }
-                document.getElementById("tw-clock").innerText = `🕒 最後更新: ${response.system_updated_at || '--:--'}`;
-                fetchedGames = response.data || [];
-                
-                const container = document.getElementById("games-list");
-                container.innerHTML = "";
-
-                if (fetchedGames.length === 0) {
-                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 目前無最新盤口數據。</div>`;
-                    return;
-                }
-
-                fetchedGames.forEach(g => {
-                    const card = document.createElement("div");
-                    card.className = "bg-gray-900 border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-gray-700 transition-all";
-                    card.onclick = () => selectGame(g.game_id);
-                    card.innerHTML = `
-                        <div class="font-bold text-white">${g.away} VS ${g.home}</div>
-                        <div class="text-xs text-gray-500 mt-1">${g.commence_time.substring(11,16)} UTC</div>
-                    `;
-                    container.appendChild(card);
-                });
-            } catch (e) {
-                console.error(e);
-            }
-        }
-
-        function selectGame(gid) {
-            const game = fetchedGames.find(g => g.game_id === gid);
-            document.getElementById("chart-placeholder").classList.add("hidden");
-            document.getElementById("chart-content").classList.remove("hidden");
-            document.getElementById("selected-matchup").innerText = `${game.away} VS ${game.home}`;
-            
-            if(myChart) myChart.destroy();
-            myChart = new Chart(document.getElementById('historyChart').getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: ['最新'],
-                    datasets: [{ label: '大小分', data: [game.latest.total || 0], borderColor: '#38bdf8' }]
-                }
+        fetch("https://mlb-pinnacle-tracker.onrender.com/games")
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById("status").innerText = "資料已回傳:";
+                document.getElementById("debug").innerText = JSON.stringify(d, null, 2);
             });
-        }
-        loadDashboard();
     </script>
 </body>
 </html>
