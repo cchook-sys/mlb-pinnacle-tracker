@@ -4,13 +4,12 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pymongo
 import certifi
 
-# ── Config ────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
 BOOKMAKER    = "pinnacle"
@@ -18,7 +17,6 @@ MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
-# ── Database ──────────────────────────────────────────────────────────────────
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 try:
@@ -30,22 +28,29 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-# ── 智慧盤口抓取 ──────────────────────────────────────────────────────────────
+# 💡 核心工具：將 UTC 時間字串轉換為美東時間的「YYYY-MM-DD」日期字串
+def convert_utc_to_est_date(utc_str: str) -> str:
+    try:
+        # 移除結尾的 Z 並解析
+        clean_ts = utc_str.replace("Z", "")
+        dt_utc = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
+        # 美東標準時間為 UTC - 5 小時 (此處採用 -5 固定時區防範夏令時間跳動錯亂)
+        dt_est = dt_utc.astimezone(timezone(timedelta(hours=-5)))
+        return dt_est.strftime("%Y-%m-%d")
+    except:
+        return ""
+
 async def fetch_and_store():
     if not ODDS_API_KEY:
         return
-
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
-
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
             if res.status_code != 200:
                 return
-
             games = res.json()
-            ts    = int(time.time())
-            stored = 0
+            ts = int(time.time())
 
             for game in games:
                 pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
@@ -75,25 +80,19 @@ async def fetch_and_store():
 
                 if has_changed or (last_snap and (ts - last_snap["ts"]) >= 7200):
                     snaps_col.insert_one(snap)
-                    stored += 1
-
-            print(f"Fetch completed. Stored {stored} snapshots.")
+            print("Fetch and store snapshots completed.")
     except Exception as e:
-        print(f"Fetch job failed: {e}")
+        print(f"Fetch failed: {e}")
 
-# ── 完賽賽果結算排程 & 48小時滾動刪除 ───────────────────────────────────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
-
     url = f"{BASE_URL}/sports/{SPORT}/scores/?apiKey={ODDS_API_KEY}&daysFrom=3"
-
     try:
         async with httpx.AsyncClient(timeout=15) as async_client:
             res = await async_client.get(url)
             if res.status_code != 200:
                 return
-
             completed_games = res.json()
             settled_count = 0
 
@@ -101,7 +100,6 @@ async def fetch_and_settle_results():
                 if not game.get("completed", False):
                     continue
                 gid = game["id"]
-                
                 if results_col.find_one({"game_id": gid}):
                     continue
 
@@ -115,31 +113,25 @@ async def fetch_and_settle_results():
                     continue
                 
                 total_outcome_score = home_score + away_score
-
                 snaps = list(snaps_col.find({"game_id": gid}, {"_id": 0}).sort("ts", pymongo.ASCENDING))
                 if not snaps:
                     continue
 
                 first_snap = snaps[0]
                 last_snap  = snaps[-1]
-
                 ml_winner = "HOME" if home_score > away_score else "AWAY"
                 opening_total = first_snap.get("total")
                 closing_total = last_snap.get("total")
 
                 opening_total_result = "PUSH"
                 if opening_total:
-                    if total_outcome_score > opening_total:
-                        opening_total_result = "OVER"
-                    elif total_outcome_score < opening_total:
-                        opening_total_result = "UNDER"
+                    if total_outcome_score > opening_total: opening_total_result = "OVER"
+                    elif total_outcome_score < opening_total: opening_total_result = "UNDER"
 
                 closing_total_result = "PUSH"
                 if closing_total:
-                    if total_outcome_score > closing_total:
-                        closing_total_result = "OVER"
-                    elif total_outcome_score < closing_total:
-                        closing_total_result = "UNDER"
+                    if total_outcome_score > closing_total: closing_total_result = "OVER"
+                    elif total_outcome_score < closing_total: closing_total_result = "UNDER"
 
                 result_doc = {
                     "game_id": gid,
@@ -158,32 +150,28 @@ async def fetch_and_settle_results():
                     "closing_ml_home": last_snap.get("ml_home"),
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }
-
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 48小時自動風控刪除過期資料
+            # 💡 【自動滾動刪除過期資料】維持精簡 2 天數據
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-            print(f"Settle completed. Purged rows older than 48 hours.")
+            print(f"Settle finished. Added {settled_count} rows. Overdated rows cleaned.")
     except Exception as e:
-        print(f"Settle job failed: {e}")
+        print(f"Settle failed: {e}")
 
-# ── 排程設定 ──────────────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def app_lifespan(app_instance: FastAPI):
-    await fetch_and_store()
-    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
+    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch", next_run_time=datetime.now())
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
     yield
     scheduler.shutdown()
 
-# ── FastAPI 宣告 ──────────────────────────────────────────────────────────────
-app = FastAPI(title="MLB Pinnacle Tracker", lifespan=app_lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker EST-Date Edition", lifespan=app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -194,30 +182,26 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-@app.get("/")
-def root():
-    return {"status": "ok", "service": "MLB FastAPI Core V9 Clean"}
-
-# ── 💡 路由 1：獲取即時看盤 (完美放寬時間過濾，100% 逼出明天 6 號賽事) ──
+# ── 💡 路由 1：依據「美東日期」獲取即時看盤 ────────────────────────────────────
 @app.get("/games")
-async def get_games():
-    await fetch_and_store()
-    
-    now = datetime.now(timezone.utc)
-    # 從 6 小時前起算，一路往後抓足未來 24 小時！完美捕捉明天放盤的卡片
-    start_filter = (now - timedelta(hours=6)).isoformat()
-    end_filter = (now + timedelta(hours=24)).isoformat()
-    
-    all_snaps = list(snaps_col.find({
-        "commence_time": {"$gte": start_filter, "$lte": end_filter}
-    }, {"_id": 0}))
+async def get_games(date: str = Query(None, description="美東日期 YYYY-MM-DD")):
+    # 如果前端沒傳日期，自動計算當下的美東日期作為預設值
+    if not date:
+        est_now = datetime.now(timezone.utc) - timedelta(hours=5)
+        date = est_now.strftime("%Y-%m-%d")
 
+    # 撈取所有快照紀錄
+    all_snaps = list(snaps_col.find({}, {"_id": 0}))
     games = {}
+    
     for s in all_snaps:
-        gid = s["game_id"]
-        if gid not in games:
-            games[gid] = []
-        games[gid].append(s)
+        # 將比賽時間轉換為美東日期進行比對過濾
+        g_est_date = convert_utc_to_est_date(s.get("commence_time", ""))
+        if g_est_date == date:
+            gid = s["game_id"]
+            if gid not in games:
+                games[gid] = []
+            games[gid].append(s)
 
     result = []
     for gid, snaps in games.items():
@@ -235,63 +219,32 @@ async def get_games():
             "commence_time": latest["commence_time"],
             "snapshot_count": len(snaps_sorted),
             "first_snap_ts": first.get("ts_iso"),
-            "latest": {
-                "ts":          latest.get("ts_iso"),
-                "total":       latest.get("total"),
-                "ml_home":     latest.get("ml_home"),
-            },
-            "open": {
-                "total":   first.get("total"),
-                "ml_home": first.get("ml_home"),
-            },
-            "delta": {
-                "total":   total_delta,
-                "ml_home": ml_home_delta,
-            },
+            "latest": {"ts": latest.get("ts_iso"), "total": latest.get("total"), "ml_home": latest.get("ml_home")},
+            "open": {"total": first.get("total"), "ml_home": first.get("ml_home")},
+            "delta": {"total": total_delta, "ml_home": ml_home_delta},
             "signal": {
                 "total": "STEAM_OVER" if total_delta >= 0.5 else ("STEAM_UNDER" if total_delta <= -0.5 else "FLAT"),
                 "ml":    "STEAM_HOME" if ml_home_delta <= -15 else ("STEAM_AWAY" if ml_home_delta >= 15 else "FLAT"),
             },
-            "history": [
-                {
-                    "ts":       s.get("ts_iso"),
-                    "total":    s.get("total"),
-                    "ml_home":  s.get("ml_home"),
-                }
-                for s in snaps_sorted
-            ],
+            "history": [{"ts": s.get("ts_iso"), "total": s.get("total"), "ml_home": s.get("ml_home")} for s in snaps_sorted],
         })
 
     result.sort(key=lambda x: x["commence_time"])
     return result
 
-# ── 路由 2：獲取歷史資料分頁 ────────────────────────────────────────────────────
 @app.get("/analytics/dataset")
 async def get_training_dataset():
-    await fetch_and_settle_results()
     results = list(results_col.find({}, {"_id": 0}).sort("commence_time", -1))
     dataset = []
-    
     for r in results:
         open_t = r.get("opening_total", 0) or 0
         close_t = r.get("closing_total", 0) or 0
-        delta_t = round(close_t - open_t, 2)
-
         dataset.append({
-            "game_id": r["game_id"],
-            "home": r["home"],
-            "away": r["away"],
-            "commence_time": r["commence_time"],
-            "opening_total": r.get("opening_total"),
-            "closing_total": r.get("closing_total"),
-            "total_changed_delta": delta_t,
-            "opening_ml_home": r.get("opening_ml_home"),
-            "closing_ml_home": r.get("closing_ml_home"),
-            "final_home_score": r["home_score"],
-            "final_away_score": r["away_score"],
-            "final_total_score": r["total_score"],
-            "ml_winner_result": r["ml_winner"],
-            "opening_total_result": r["opening_total_result"],
-            "closing_total_result": r["closing_total_result"]
+            "game_id": r["game_id"], "home": r["home"], "away": r["away"], "commence_time": r["commence_time"],
+            "opening_total": r.get("opening_total"), "closing_total": r.get("closing_total"),
+            "total_changed_delta": round(close_t - open_t, 2),
+            "opening_ml_home": r.get("opening_ml_home"), "closing_ml_home": r.get("closing_ml_home"),
+            "final_home_score": r["home_score"], "final_away_score": r["away_score"], "final_total_score": r["total_score"],
+            "ml_winner_result": r["ml_winner"], "opening_total_result": r["opening_total_result"], "closing_total_result": r["closing_total_result"]
         })
     return dataset
