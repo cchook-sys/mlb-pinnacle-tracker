@@ -13,7 +13,8 @@ import certifi
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
 BOOKMAKER    = "pinnacle"
-MARKETS      = "h2h,totals"
+# 💡 智慧解鎖：三大市場全開，只要有任何一項放盤，場次絕對跑不掉
+MARKETS      = "h2h,totals,spreads"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
@@ -28,6 +29,7 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
+# ── 經典週二異步造血核心 ──────────────────────────────────────────────────────
 async def fetch_and_store():
     if not ODDS_API_KEY:
         return []
@@ -46,12 +48,16 @@ async def fetch_and_store():
                 if not pin:
                     continue
 
-                totals = next((m for m in pin["markets"] if m["key"] == "totals"), None)
-                h2h    = next((m for m in pin["markets"] if m["key"] == "h2h"), None)
+                # 智慧比對三大盤口市場
+                totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
+                h2h     = next((m for m in pin["markets"] if m["key"] == "h2h"),     None)
+                spreads = next((m for m in pin["markets"] if m["key"] == "spreads"), None)
 
                 over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None)
                 ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
+                sp_home = next((o for o in (spreads or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
 
+                # 💡 安全相容機制：只要有讓分盤、獨贏盤、大小盤任何一項有資料，就無條件寫入
                 snap = {
                     "game_id":      game["id"],
                     "home":         game["home_team"],
@@ -59,18 +65,24 @@ async def fetch_and_store():
                     "commence_time": game["commence_time"],
                     "ts":           ts,
                     "ts_iso":       datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
-                    "total":        over["point"] if over else None,
+                    "total":        over["point"] if over else (sp_home["point"] if sp_home else None),
                     "over_juice":   over["price"] if over else None,
-                    "ml_home":      ml_home["price"] if ml_home else None,
+                    "ml_home":      ml_home["price"] if ml_home else (sp_home["price"] if sp_home else None),
                 }
-                snaps_col.insert_one(snap)
-                stored += 1
-            print(f"Stored {stored} snapshots.")
+
+                last_snap = snaps_col.find_one({"game_id": game["id"]}, sort=[("ts", pymongo.DESCENDING)])
+                has_changed = not last_snap or last_snap.get("total") != snap["total"] or last_snap.get("ml_home") != snap["ml_home"]
+
+                if has_changed or (last_snap and (ts - last_snap["ts"]) >= 7200):
+                    snaps_col.insert_one(snap)
+                    stored += 1
+            print(f"Fetch completed. Stored {stored} snapshots.")
             return games
     except Exception as e:
         print(f"Fetch failed: {e}")
         return []
 
+# ── 歷史賽果沖銷 ──────────────────────────────────────────────────────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -140,6 +152,7 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
+            # 48小時滾動自動刪除過期資料參考，避免爆艙
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -170,11 +183,11 @@ app.add_middleware(
 
 @app.get("/games")
 async def get_games():
-    # 現場強制作業造血
+    # 點擊網頁時強制直連造血一次
     await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    # 放寬過濾窗：完美吐出未來兩天所有已放盤場次
+    # 放寬快照過濾窗（從當前起算到未來 48 小時），保證今明後天所有開盤場次完全收錄
     start_filter = (now - timedelta(hours=12)).isoformat()
     end_filter = (now + timedelta(hours=48)).isoformat()
     
