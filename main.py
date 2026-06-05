@@ -70,7 +70,7 @@ async def fetch_and_store_job():
     except:
         pass
 
-# ── 賽果結算與 48 小時自動沖銷 ────────────────────────────────────────────────
+# ── 賽果結算與 48 小時自動沖銷 (已將 || 修正為 Python 標準 or) ──────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -87,11 +87,11 @@ async def fetch_and_settle_results():
                 if results_col.find_one({"game_id": gid}): continue
 
                 scores = game.get("scores", [])
-                if not scores || len(scores) < 2: continue
+                if not scores or len(scores) < 2: continue
 
                 home_score = next((int(s["score"]) for s in scores if s["name"] == game["home_team"]), None)
                 away_score = next((int(s["score"]) for s in scores if s["name"] == game["away_team"]), None)
-                if home_score is None || away_score is None: continue
+                if home_score is None or away_score is None: continue
                 
                 total_outcome_score = home_score + away_score
                 snaps = list(snaps_col.find({"game_id": gid}, {"_id": 0}).sort("ts", pymongo.ASCENDING))
@@ -151,7 +151,7 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# ── 💡 週二核心復活：完全不讀資料庫，現場呼叫 API，直接原汁原味吐出 ──────────
+# ── 💡 週二核心復活：現場直通 API，排除資料庫干擾 ──────────────────────────
 @app.get("/games")
 async def get_games():
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&bookmakers={BOOKMAKER}&oddsFormat={ODDS_FORMAT}"
@@ -165,26 +165,25 @@ async def get_games():
                 for game in games:
                     pin = next((b for b in game.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
                     
-                    # 經典格式現場解析
                     totals = next((m for m in pin["markets"] if m["key"] == "totals"), None) if pin else None
                     h2h    = next((m for m in pin["markets"] if m["key"] == "h2h"), None) if pin else None
 
-                    over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None)
-                    ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None)
+                    over    = next((o for o in (totals or {}).get("outcomes", []) if o["name"] == "Over"), None) if totals else None
+                    ml_home = next((o for o in (h2h or {}).get("outcomes", []) if o["name"] == game["home_team"]), None) if h2h else None
 
-                    # 經典週二 Delta 計算 (若無歷史就先呈現 0，保障卡片 100% 現形)
+                    # 經典週二直出欄位對齊
                     result_list.append({
                         "game_id":       game["id"],
                         "home":          game["home_team"],
                         "away":          game["away_team"],
                         "commence_time": game["commence_time"],
                         "latest": {
-                            "total":   over["point"] if over else null,
-                            "ml_home": ml_home["price"] if ml_home else null,
+                            "total":   over["point"] if over else None,
+                            "ml_home": ml_home["price"] if ml_home else None,
                         },
                         "open": {
-                            "total":   over["point"] if over else null,
-                            "ml_home": ml_home["price"] if ml_home else null,
+                            "total":   over["point"] if over else None,
+                            "ml_home": ml_home["price"] if ml_home else None,
                         },
                         "delta": {
                             "total":   0,
