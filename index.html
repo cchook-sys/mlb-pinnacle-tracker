@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle 數據量化儀表板 - 極簡完全體</title>
+    <title>MLB Pinnacle 數據量化儀表板 - 實戰完全體</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -32,7 +32,7 @@
 
         <div id="live-view" class="grid grid-cols-12 gap-6">
             <div class="col-span-12 md:col-span-5 space-y-2 max-h-[80vh] overflow-y-auto pr-1" id="games-list">
-                <div class="text-center py-12 text-xs text-gray-500">🔄 正在載入大聯盟最新已放盤賽事...</div>
+                <div class="text-center py-12 text-xs text-gray-500">🔄 正在同步全市場已放盤賽事...</div>
             </div>
             
             <div class="col-span-12 md:col-span-7 bg-gray-900/50 border border-gray-800 rounded-xl p-6 max-h-[80vh] overflow-y-auto sticky top-4" id="chart-container">
@@ -62,7 +62,7 @@
                         <div class="flex items-center gap-2">
                             <span class="text-xl">📊</span>
                             <div>
-                                <div class="text-white text-xs font-bold">歷史同特徵動態校正回饋</div>
+                                <div class="text-white text-xs font-bold">歷史同特蹤動態校正回饋</div>
                                 <div id="calibration-text" class="text-emerald-400 text-xs font-mono mt-0.5">--</div>
                             </div>
                         </div>
@@ -143,7 +143,6 @@
                 const res = await fetch(`${API_BASE}/games?nocache=${Date.now()}`);
                 const parsedPayload = await res.json();
                 
-                // 💡 核心修正：對齊後端拋出的更新對時時間
                 if(parsedPayload.system_updated_at){
                     document.getElementById("tw-clock").innerText = `🕒 資料最後更新時間: ${parsedPayload.system_updated_at}`;
                 }
@@ -153,7 +152,7 @@
                 container.innerHTML = "";
 
                 if (!fetchedGames || fetchedGames.length === 0) {
-                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 目前大聯盟官方尚未放出任何最新賽事盤口。</div>`;
+                    container.innerHTML = `<div class="text-center py-12 text-xs text-gray-500">📭 目前官方尚未放出任何最新美金盤口。</div>`;
                     return;
                 }
 
@@ -175,8 +174,8 @@
                             <div class="text-sm font-bold text-white mt-1">${g.away} VS ${g.home}</div>
                         </div>
                         <div class="grid grid-cols-2 gap-2 text-xs text-gray-400 mt-2 font-mono border-t border-gray-800/40 pt-2">
-                            <div>大小幅度: <span class="text-sky-400 font-bold">${g.delta.total > 0 ? '+'+g.delta.total : g.delta.total}</span></div>
-                            <div>主ML幅度: <span class="text-amber-400 font-bold">${g.delta.ml_home > 0 ? '+'+g.delta.ml_home : g.delta.ml_home}</span></div>
+                            <div>大小/受讓基準: <span class="text-sky-400 font-bold">${g.open.total || '--'}</span></div>
+                            <div>大小/讓分幅度: <span class="text-amber-400 font-bold">${g.delta.total > 0 ? '+'+g.delta.total : g.delta.total}</span></div>
                         </div>
                     `;
                     container.appendChild(card);
@@ -211,32 +210,27 @@
             const deltaTotal = game.delta ? game.delta.total : 0;
             const deltaML = game.delta ? game.delta.ml_home : 0;
 
-            if (totalSignal === "STEAM_OVER") {
+            if (totalSignal === "STEAM_OVER" || deltaML <= -15) {
                 verdictPanel.className = "p-4 rounded-xl border border-rose-500 bg-rose-500/10 flex flex-col gap-1.5 font-sans shadow-lg animate-pulse";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-rose-400";
-                verdictTitle.innerHTML = `🔥 最終推薦：搶進 【 大 分 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 美金大資金強力突破達 ${deltaTotal}。建議買進降階的 <b>「${currentTotal - 0.5} 大」</b> 進行安全對沖。`;
+                verdictTitle.innerHTML = `🔥 實戰判定：滿足進場指標`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 大資金有顯著單邊灌注突破（大小變動 ${deltaTotal} / 獨贏變動 ${deltaML}）。建議臨場切入，若怕水位被卡死，可靈活搭配降階的替代讓分或大小玩過關！`;
             } else if (totalSignal === "STEAM_UNDER") {
                 verdictPanel.className = "p-4 rounded-xl border border-sky-500 bg-sky-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-sky-400";
-                verdictTitle.innerHTML = `❄️ 最終推薦：搶進 【 小 分 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 資金拋售總分數。建議利用替代盤口加防，鎖定 <b>「${currentTotal + 0.5} 小」</b>。`;
-            } else if (deltaML <= -15) {
-                verdictPanel.className = "p-4 rounded-xl border border-amber-500 bg-amber-500/10 flex flex-col gap-1.5 font-sans shadow-lg";
-                verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-amber-400";
-                verdictTitle.innerHTML = `🏠 最終推薦：獨贏進場 【 主 隊 贏 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 獨贏資金下壓達 ${deltaML} 點。實戰推薦直接下注主隊獨贏。`;
+                verdictTitle.innerHTML = `❄️ 實戰判定：搶進低位市場`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 核心資金拋售。建議利用替代受讓或加分盤口進場，鎖定防守空間，非常適合當作串關穩當基底。`;
             } else {
                 verdictPanel.className = "p-4 rounded-xl border border-gray-700 bg-gray-800/20 flex flex-col gap-1.5 font-sans shadow-lg";
                 verdictTitle.className = "text-xl md:text-2xl font-black tracking-wide text-gray-400";
-                verdictTitle.innerHTML = `💤 最終推薦：【 空 倉 觀 望 】`;
-                verdictDesc.innerHTML = `<b>量化理由：</b> 盤口處於平穩死水狀態，此時盲目切入極易被莊家咬死，建議耐心按兵不動。`;
+                verdictTitle.innerHTML = `💤 實戰判定：【 空 倉 觀 望 】`;
+                verdictDesc.innerHTML = `<b>量化理由：</b> 盤口目前處於平穩死水狀態。依歷史回測，此時盲目重注最容易落入誘盤盲區，建議按兵不動，等臨場 30 分鐘資金突破。`;
             }
 
-            calibrationText.innerText = "當前狀態 -> 現場自造血功能已全天候強制打通";
-            calibrationRating.innerText = "即時刷新";
+            calibrationText.innerText = "當前狀態 -> 異步數據活水機制已同步通電運作中";
+            calibrationRating.innerText = "即時監控中";
             calibrationRating.className = "bg-emerald-500 text-gray-950 font-black text-[10px] px-1.5 py-0.5 rounded";
-            guideText.innerHTML = `👉 <b>實戰風控：</b> 請依照左側顯示的台灣本地開賽時間對時，鎖定開賽前 30 分鐘大資金砸盤信號再進場。`;
+            guideText.innerHTML = `👉 <b>過關策略指引：</b> 優先挑選左側顯示具有「🎯 進場」紅色標籤的場次。結合折線圖趨勢，挑選兩場 Delta 大於 0.5 且臨場方向一致的降階替代盤口，進行 2 串 1 或 3 串 1 實戰過關。`;
 
             const labels = game.history.map(h => h.ts.substring(11,16));
             if(myChart) myChart.destroy();
@@ -245,8 +239,8 @@
                 data: {
                     labels: labels,
                     datasets: [
-                        { label: '大小分', data: game.history.map(h => h.total), borderColor: '#38bdf8', tension: 0.1, yAxisID: 'y1' },
-                        { label: '主隊ML', data: game.history.map(h => h.ml_home), borderColor: '#fbbf24', borderDash:[5,5], yAxisID: 'y2' }
+                        { label: '大小/基準變動', data: game.history.map(h => h.total), borderColor: '#38bdf8', tension: 0.1, yAxisID: 'y1' },
+                        { label: '獨贏/讓分水位', data: game.history.map(h => h.ml_home), borderColor: '#fbbf24', borderDash:[5,5], yAxisID: 'y2' }
                     ]
                 },
                 options: { scales: { y1: { position: 'left' }, y2: { position: 'right', grid: { drawOnChartArea: false } } } }
