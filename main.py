@@ -25,12 +25,6 @@ try:
     snaps_col = db["snapshots"]
     results_col = db["results"]
     print("MongoDB Connected Successfully")
-    
-    # 💡 【終極大絕招：全自動清空 MongoDB 雲端資料庫】
-    # 開機時直接無條件清空 snapshots 與 results，徹底排除舊髒資料的干擾
-    snaps_col.delete_many({})
-    results_col.delete_many({})
-    print("🧹 [資料庫清空令] 已成功將雲端 MongoDB 歷史殘留舊快照與賽果全數洗淨！")
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
@@ -68,12 +62,9 @@ async def fetch_and_store():
                     "over_juice":   over["price"] if over else None,
                     "ml_home":      ml_home["price"] if ml_home else None,
                 }
-
-                last_snap = snaps_col.find_one({"game_id": game["id"]}, sort=[("ts", pymongo.DESCENDING)])
-                has_changed = not last_snap or last_snap.get("total") != snap["total"] or last_snap.get("ml_home") != snap["ml_home"]
-
-                if has_changed or (last_snap and (ts - last_snap["ts"]) >= 7200):
-                    snaps_col.insert_one(snap)
+                
+                # 💡 暴力強制注入：只要來造血，直接寫入，確保清空資料庫後一秒滿血！
+                snaps_col.insert_one(snap)
             return games
     except Exception as e:
         print(f"Fetch failed: {e}")
@@ -148,7 +139,6 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 48小時滾動自動刪除過期賽果數據
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -179,11 +169,11 @@ app.add_middleware(
 
 @app.get("/games")
 async def get_games():
-    # 當有人點擊時，現場強制去敲 odds API 重新向資料庫注入最純淨的當下活水
+    # 現場強制抓取，不比對直接寫入，打通最後阻礙
     await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    # 開放時間過濾窗：從 12 小時前一直到未來 48 小時
+    # 取消任何可能卡死今天下午場次的時間窗，直接往後推 48 小時內已開盤的所有活水賽事全出
     start_filter = (now - timedelta(hours=12)).isoformat()
     end_filter = (now + timedelta(hours=48)).isoformat()
     
