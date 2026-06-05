@@ -1,7 +1,5 @@
-flask
-flask-cors
+fastapi
+uvicorn
+httpx
 pymongo
 certifi
-requests
-apscheduler
-gunicorn
