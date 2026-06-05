@@ -10,6 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pymongo
 import certifi
 
+# ── Config ────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
 BOOKMAKER    = "pinnacle"
@@ -17,6 +18,7 @@ MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
 BASE_URL     = "https://api.the-odds-api.com/v4"
 
+# ── Database ──────────────────────────────────────────────────────────────────
 MONGO_URI = "mongodb+srv://ccanthook:surfing135%3D@cluster0.cinyz41.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 try:
@@ -28,6 +30,7 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
+# ── 智慧盤口抓取 ──────────────────────────────────────────────────────────────
 async def fetch_and_store():
     if not ODDS_API_KEY:
         return
@@ -78,6 +81,7 @@ async def fetch_and_store():
     except Exception as e:
         print(f"Fetch job failed: {e}")
 
+# ── 完賽賽果結算排程 & 48小時滾動刪除 ───────────────────────────────────────────
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
         return
@@ -158,13 +162,15 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
+            # 48小時自動風控刪除過期資料
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
-            print(f"Settle completed. Added {settled_count} rows. Overdated rows purged.")
+            print(f"Settle completed. Purged rows older than 48 hours.")
     except Exception as e:
         print(f"Settle job failed: {e}")
 
+# ── 排程設定 ──────────────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
@@ -176,6 +182,7 @@ async def app_lifespan(app_instance: FastAPI):
     yield
     scheduler.shutdown()
 
+# ── FastAPI 宣告 ──────────────────────────────────────────────────────────────
 app = FastAPI(title="MLB Pinnacle Tracker", lifespan=app_lifespan)
 
 app.add_middleware(
@@ -191,13 +198,15 @@ app.add_middleware(
 def root():
     return {"status": "ok", "service": "MLB FastAPI Core V9 Clean"}
 
+# ── 💡 路由 1：獲取即時看盤 (完美放寬時間過濾，100% 逼出明天 6 號賽事) ──
 @app.get("/games")
 async def get_games():
     await fetch_and_store()
     
     now = datetime.now(timezone.utc)
-    start_filter = (now - timedelta(hours=12)).isoformat()
-    end_filter = (now + timedelta(hours=12)).isoformat()
+    # 從 6 小時前起算，一路往後抓足未來 24 小時！完美捕捉明天放盤的卡片
+    start_filter = (now - timedelta(hours=6)).isoformat()
+    end_filter = (now + timedelta(hours=24)).isoformat()
     
     all_snaps = list(snaps_col.find({
         "commence_time": {"$gte": start_filter, "$lte": end_filter}
@@ -256,6 +265,7 @@ async def get_games():
     result.sort(key=lambda x: x["commence_time"])
     return result
 
+# ── 路由 2：獲取歷史資料分頁 ────────────────────────────────────────────────────
 @app.get("/analytics/dataset")
 async def get_training_dataset():
     await fetch_and_settle_results()
