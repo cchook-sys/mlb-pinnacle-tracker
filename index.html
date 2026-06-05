@@ -7,38 +7,45 @@
 </head>
 <body class="p-6">
     <div class="max-w-4xl mx-auto">
-        <h1 class="text-2xl font-bold mb-1">MLB Pinnacle 數據監控</h1>
+        <h1 class="text-2xl font-bold mb-1 text-white">MLB Pinnacle 數據監控</h1>
         <div id="status" class="text-sm text-sky-400 font-mono mb-6">同步時間: --:--:--</div>
-        
         <div id="games-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
     </div>
 
     <script>
         async function fetchGames() {
-            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-            const json = await res.json();
-            document.getElementById("status").innerText = "最後同步: " + json.system_updated_at;
-            
-            const list = document.getElementById("games-list");
-            list.innerHTML = "";
-            
-            json.data.forEach(g => {
-                const pin = (g.bookmakers || []).find(b => b.key === 'pinnacle') || (g.bookmakers || [])[0];
-                const h2h = pin?.markets.find(m => m.key === 'h2h')?.outcomes[0]?.price || '--';
-                const tot = pin?.markets.find(m => m.key === 'totals')?.outcomes[0]?.point || '--';
+            try {
+                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                const json = await res.json();
+                document.getElementById("status").innerText = "最後同步: " + (json.system_updated_at || "未知");
                 
-                list.innerHTML += `
-                    <div class="bg-slate-900 border border-slate-700 p-4 rounded-lg shadow hover:border-sky-500 transition-all">
-                        <div class="font-bold text-white text-lg">${g.away_team} VS ${g.home_team}</div>
+                const list = document.getElementById("games-list");
+                list.innerHTML = "";
+                
+                const games = json.data || [];
+                games.forEach(g => {
+                    const away = g.away_team || "未知";
+                    const home = g.home_team || "未知";
+                    const pin = (g.bookmakers || []).find(b => b.key === 'pinnacle') || (g.bookmakers || [])[0];
+                    const h2h = pin?.markets.find(m => m.key === 'h2h')?.outcomes[0]?.price || '--';
+                    const tot = pin?.markets.find(m => m.key === 'totals')?.outcomes[0]?.point || '--';
+                    
+                    const card = document.createElement("div");
+                    card.className = "bg-slate-900 border border-slate-700 p-4 rounded-lg hover:border-sky-500 transition-all";
+                    card.innerHTML = `
+                        <div class="font-bold text-white text-lg">${away} VS ${home}</div>
                         <div class="flex gap-4 mt-2 text-sm">
                             <span class="text-sky-400 font-mono">獨贏: ${h2h}</span>
                             <span class="text-amber-400 font-mono">大小分: ${tot}</span>
-                        </div>
-                    </div>`;
-            });
+                        </div>`;
+                    list.appendChild(card);
+                });
+            } catch (e) {
+                document.getElementById("status").innerText = "❌ 獲取失敗";
+            }
         }
         fetchGames();
-        setInterval(fetchGames, 60000); // 每分鐘自動更新
+        setInterval(fetchGames, 60000);
     </script>
 </body>
 </html>
