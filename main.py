@@ -12,7 +12,6 @@ import certifi
 
 ODDS_API_KEY = "5a02e608035ba7b2c5da994b791fc6f4"
 SPORT        = "baseball_mlb"
-# 💡 核心降階防線：優先判定 pinnacle，若免費 API 延遲，自動調用 betonlineag 或 bovada 填補空窗
 BOOKMAKERS   = ["pinnacle", "betonlineag", "bovada"]
 MARKETS      = "h2h,totals"
 ODDS_FORMAT  = "american"
@@ -29,7 +28,8 @@ try:
 except Exception as e:
     print(f"MongoDB Connection Failed: {e}")
 
-async def fetch_and_store():
+# 💡 將抓取邏輯獨立出來，方便隨時隨地強制現場造血
+async def execute_live_crawl_core():
     if not ODDS_API_KEY:
         return []
     url = f"{BASE_URL}/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets={MARKETS}&oddsFormat={ODDS_FORMAT}"
@@ -43,7 +43,6 @@ async def fetch_and_store():
             stored = 0
 
             for game in games:
-                # 💡 輪詢尋找當前有放盤的備援大資金美金盤
                 pin = None
                 for bm_key in BOOKMAKERS:
                     pin = next((b for b in game.get("bookmakers", []) if b["key"] == bm_key), None)
@@ -71,14 +70,17 @@ async def fetch_and_store():
                     "ml_home":      ml_home["price"] if ml_home else None,
                 }
                 
-                # 暴力硬塞注入，徹底盤活清空後的資料庫空窗
+                # 現場無條件注入，打破一切快照死結
                 snaps_col.insert_one(snap)
                 stored += 1
-            print(f"Stored {stored} live snapshots.")
+            print(f"Core crawl successfully stored {stored} snapshots.")
             return games
     except Exception as e:
-        print(f"Fetch failed: {e}")
+        print(f"Core crawl failed: {e}")
         return []
+
+async def fetch_and_store_job():
+    await execute_live_crawl_core()
 
 async def fetch_and_settle_results():
     if not ODDS_API_KEY:
@@ -149,7 +151,6 @@ async def fetch_and_settle_results():
                 results_col.insert_one(result_doc)
                 settled_count += 1
 
-            # 48小時滾動刪除，防止爆艙
             time_boundary = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
             results_col.delete_many({"commence_time": {"$lt": time_boundary}})
             snaps_col.delete_many({"commence_time": {"$lt": time_boundary}})
@@ -160,8 +161,8 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def app_lifespan(app_instance: FastAPI):
-    await fetch_and_store()
-    scheduler.add_job(fetch_and_store, "interval", minutes=10, id="pinnacle_fetch")
+    # 開機時不給 Render 壓力，等連線與時間伺服器穩定
+    scheduler.add_job(fetch_and_store_job, "interval", minutes=10, id="pinnacle_fetch")
     scheduler.add_job(fetch_and_settle_results, "interval", minutes=30, id="results_settle")
     scheduler.start()
     yield
@@ -178,13 +179,14 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# ── 💡 核心改動：Games 路由改為現場即時撈取，徹底打破重啟快取 ─────────────────
 @app.get("/games")
 async def get_games():
-    # 現場呼叫同步
-    await fetch_and_store()
+    # 網頁一被讀取，立刻現場強行連線 odds API 抓取最新活水，補償開機時差的落空！
+    await execute_live_crawl_core()
     
     now = datetime.now(timezone.utc)
-    # 放寬時間窗：從 12 小時前到未來 48 小時內所有開盤比賽通通打包回傳！
+    # 時間窗完美放開：前後各包攬今明兩天所有盤口
     start_filter = (now - timedelta(hours=12)).isoformat()
     end_filter = (now + timedelta(hours=48)).isoformat()
     
