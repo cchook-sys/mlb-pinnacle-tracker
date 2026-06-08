@@ -4,6 +4,7 @@ import httpx
 
 app = FastAPI()
 
+# 解決 CORS 跨域問題，允許 GitHub Pages 存取
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -11,8 +12,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 你的 API Key (請確保這是從 The Odds API 申請的有效 Key)
-API_KEY = "79112bb70773a2cdf998cb3112b18589"
+# 你的 API Key
+ODDS_API_KEY = "79112bb70773a2cdf998cb3112b18589"
 
 @app.get("/")
 def read_root():
@@ -20,12 +21,13 @@ def read_root():
 
 @app.get("/games")
 async def get_games():
-    # 呼叫 The Odds API 獲取 MLB 賽事賠率
-    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
-    
-    async with httpx.AsyncClient() as client:
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american"
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.get(url)
-            return {"status": "ok", "data": response.json()}
+            if response.status_code == 200:
+                return {"status": "ok", "data": response.json()}
+            else:
+                return {"status": "error", "message": "API error", "code": response.status_code}
         except Exception as e:
             return {"status": "error", "message": str(e)}
