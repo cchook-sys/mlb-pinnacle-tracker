@@ -1,12 +1,21 @@
+# 1. 必須先從 fastapi 導入
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import httpx
+
+# 2. 必須先宣告 app
+app = FastAPI()
+
+# 3. 再設定 Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 4. 最後才可以使用 @app.get
 @app.get("/games")
 async def get_games():
-    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h"
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client: # 延長超時等待到 30 秒
-            response = await client.get(url)
-            if response.status_code == 200:
-                return {"data": response.json(), "status": "success"}
-            else:
-                return {"data": [], "status": "error", "message": "API 回應異常"}
-    except Exception as e:
-        return {"data": [], "status": "error", "message": str(e)}
+    # 這裡放你的 API 邏輯
+    return {"status": "ok"}
