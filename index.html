@@ -1,44 +1,46 @@
-// 優化後的選取函數，加入防呆與效能鎖定
-async function selectGame(id, title, away, home) {
-    document.getElementById('game-title').innerText = title;
-    
-    try {
-        // 1. 執行請求
-        const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
-        const data = await res.json();
-        
-        // 2. 更新表格 (分離處理，避免影響繪圖)
-        const oddsTable = document.getElementById('odds-table');
-        oddsTable.innerHTML = `
-            <div class="p-3 bg-slate-800 rounded border border-slate-700">
-                <p class="text-[10px] text-slate-400 uppercase">Pinnacle H2H (客)</p>
-                <p class="text-sm font-bold text-white">${away}: -150</p>
-            </div>
-            <div class="p-3 bg-slate-800 rounded border border-slate-700">
-                <p class="text-[10px] text-slate-400 uppercase">Pinnacle H2H (主)</p>
-                <p class="text-sm font-bold text-white">${home}: +130</p>
-            </div>
-        `;
+<script>
+        // 將函數掛載到 window 物件，確保點擊事件一定找得到它
+        window.selectGame = async function(id, title, away, home) {
+            document.getElementById('game-title').innerText = title;
+            
+            try {
+                const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
+                const data = await res.json();
+                
+                // 填充數據表格
+                document.getElementById('h2h-odds').innerText = "-150"; // 模擬數據
+                document.getElementById('delta-odds').innerText = "-3"; // 模擬數據
 
-        // 3. 繪圖效能處理
-        const canvas = document.getElementById('oddsChart');
-        const ctx = canvas.getContext('2d');
-        
-        if (myChart) {
-            myChart.data.labels = data.map(d => d.time);
-            myChart.data.datasets[0].data = data.map(d => d.odds);
-            myChart.update('none'); // 使用 'none' 模式大幅降低繪圖延遲
-        } else {
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: { 
-                    labels: data.map(d => d.time), 
-                    datasets: [{ label: 'Pinnacle Odds', data: data.map(d => d.odds), borderColor: '#38bdf8', tension: 0.1 }] 
-                },
-                options: { responsive: true, maintainAspectRatio: false, animation: false } // 關閉動畫，徹底解決卡頓
-            });
+                // 繪製圖表
+                const ctx = document.getElementById('oddsChart').getContext('2d');
+                if (window.myChart) window.myChart.destroy();
+                window.myChart = new Chart(ctx, {
+                    type: 'line',
+                    data: { 
+                        labels: data.map(d => d.time), 
+                        datasets: [{ label: 'Pinnacle', data: data.map(d => d.odds), borderColor: '#38bdf8', tension: 0.1 }] 
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, animation: false }
+                });
+            } catch (err) {
+                console.error("載入比賽失敗:", err);
+            }
+        };
+
+        // 初始化列表
+        async function fetchGames() {
+            try {
+                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                const json = await res.json();
+                const list = document.getElementById('games-list');
+                list.innerHTML = json.data.map(g => `
+                    <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}', '${g.away_team}', '${g.home_team}')" 
+                         class="p-3 bg-slate-800 rounded cursor-pointer hover:bg-sky-900 border-l-4 border-sky-500">
+                        <div class="text-sm font-bold truncate">${g.away_team} @ ${g.home_team}</div>
+                    </div>
+                `).join('');
+            } catch(e) { console.error("初始化失敗:", e); }
         }
-    } catch (err) {
-        console.error("渲染失敗:", err);
-    }
-}
+        
+        fetchGames();
+    </script>
