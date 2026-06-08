@@ -1,12 +1,9 @@
-# 1. 必須先從 fastapi 導入
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import httpx
 
-# 2. 必須先宣告 app
 app = FastAPI()
 
-# 3. 再設定 Middleware
+# 設定 CORS，確保前端 GitHub Pages 可以存取
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,8 +11,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 4. 最後才可以使用 @app.get
+# 定義根目錄，解決 404
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "API is running"}
+
+# 定義 games 路由
 @app.get("/games")
-async def get_games():
-    # 這裡放你的 API 邏輯
-    return {"status": "ok"}
+def get_games():
+    # 暫時回傳測試資料，確保路由通暢
+    return {"status": "ok", "data": []}
