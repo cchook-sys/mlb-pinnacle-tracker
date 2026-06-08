@@ -1,51 +1,56 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-TW" class="dark">
 <head>
     <meta charset="UTF-8">
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>body { background-color: #0f172a; color: #f1f5f9; }</style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>body { background-color: #020617; }</style>
 </head>
 <body class="p-6">
-    <div class="max-w-4xl mx-auto">
-        <h1 class="text-2xl font-bold mb-1 text-white">MLB Pinnacle 數據監控</h1>
-        <div id="status" class="text-sm text-sky-400 font-mono mb-6">同步時間: --:--:--</div>
-        <div id="games-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-2xl font-bold text-white mb-1">MLB Pinnacle 數據監控</h1>
+        <div id="status" class="text-sm text-sky-400 mb-6 font-mono">最後更新時間: --:--:--</div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div id="games-list" class="space-y-3"></div>
+            <div class="md:col-span-2 bg-slate-900 p-6 rounded-xl border border-slate-700">
+                <canvas id="oddsChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <script>
+        let myChart;
         async function fetchGames() {
-            try {
-                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                const json = await res.json();
-                document.getElementById("status").innerText = "最後同步: " + (json.system_updated_at || "未知");
-                
-                const list = document.getElementById("games-list");
-                list.innerHTML = "";
-                
-                const games = json.data || [];
-                games.forEach(g => {
-                    const away = g.away_team || "未知";
-                    const home = g.home_team || "未知";
-                    const pin = (g.bookmakers || []).find(b => b.key === 'pinnacle') || (g.bookmakers || [])[0];
-                    const h2h = pin?.markets.find(m => m.key === 'h2h')?.outcomes[0]?.price || '--';
-                    const tot = pin?.markets.find(m => m.key === 'totals')?.outcomes[0]?.point || '--';
-                    
-                    const card = document.createElement("div");
-                    card.className = "bg-slate-900 border border-slate-700 p-4 rounded-lg hover:border-sky-500 transition-all";
-                    card.innerHTML = `
-                        <div class="font-bold text-white text-lg">${away} VS ${home}</div>
-                        <div class="flex gap-4 mt-2 text-sm">
-                            <span class="text-sky-400 font-mono">獨贏: ${h2h}</span>
-                            <span class="text-amber-400 font-mono">大小分: ${tot}</span>
-                        </div>`;
-                    list.appendChild(card);
-                });
-            } catch (e) {
-                document.getElementById("status").innerText = "❌ 獲取失敗";
-            }
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            document.getElementById("status").innerText = "最後更新時間: " + (json.last_update || "未知");
+            
+            const list = document.getElementById("games-list");
+            list.innerHTML = "";
+            json.data.forEach(g => {
+                const div = document.createElement("div");
+                div.className = "p-4 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer hover:border-sky-500 transition-all";
+                div.innerHTML = `<div class="font-bold text-white">${g.away_team} VS ${g.home_team}</div>`;
+                div.onclick = () => updateChart(g.id);
+                list.appendChild(div);
+            });
+        }
+
+        async function updateChart(gameId) {
+            const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${gameId}`);
+            const data = await res.json();
+            const ctx = document.getElementById('oddsChart').getContext('2d');
+            if(myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: { 
+                    labels: data.map(d => d.time), 
+                    datasets: [{ label: '水位變化', data: data.map(d => d.odds), borderColor: '#38bdf8', tension: 0.3 }] 
+                }
+            });
         }
         fetchGames();
-        setInterval(fetchGames, 60000);
     </script>
 </body>
 </html>
