@@ -1,54 +1,62 @@
 <!DOCTYPE html>
 <html lang="zh-TW" class="dark">
 <head>
-    <meta charset="UTF-8">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { background-color: #0b1120; color: #cbd5e1; }
-        .panel { background-color: #161e2e; border: 1px solid #1e293b; border-radius: 4px; }
-    </style>
 </head>
-<body class="p-2 h-screen flex gap-2 overflow-hidden">
-    
-    <div id="sidebar" class="w-1/4 panel overflow-y-auto p-2">
-        <h2 class="text-white font-bold text-sm mb-4">即時賽事</h2>
-        <div id="game-list">讀取中...</div>
-    </div>
-
-    <div class="flex-1 panel p-4">
-        <canvas id="oddsChart"></canvas>
+<body class="bg-[#0b1120] text-slate-300 font-mono text-[11px]">
+    <div class="grid grid-cols-5 gap-2 h-screen p-2">
+        <div id="games-list" class="col-span-1 bg-[#1e293b] p-2 overflow-y-auto space-y-1"></div>
+        
+        <div class="col-span-4 grid grid-rows-3 gap-2">
+            <div class="row-span-2 bg-[#1e293b] p-4 border border-slate-700">
+                <h2 id="game-title" class="text-white font-bold mb-2">請選擇比賽</h2>
+                <canvas id="oddsChart"></canvas>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div class="bg-[#1e293b] p-4 border border-slate-700">
+                    <p class="text-slate-500">MONEYLINE (獨贏)</p>
+                    <div id="h2h-data" class="text-xl text-sky-400 font-bold">--</div>
+                </div>
+                <div class="bg-[#1e293b] p-4 border border-slate-700">
+                    <p class="text-slate-500">TOTALS (大小分)</p>
+                    <div id="total-data" class="text-xl text-amber-400 font-bold">--</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
-        const API_BASE_URL = "https://mlb-pinnacle-tracker.onrender.com";
-
-        async function init() {
-            try {
-                const res = await fetch(`${API_BASE_URL}/games`);
-                const games = await res.json();
-                document.getElementById('game-list').innerHTML = games.map(g => `
-                    <div onclick="renderChart('${g.id}')" class="panel p-3 cursor-pointer hover:bg-slate-700">
-                        ${g.away_team} vs ${g.home_team}
-                    </div>
-                `).join('');
-            } catch(e) { document.getElementById('game-list').innerText = "API連線失敗"; }
+        let myChart;
+        async function fetchGames() {
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            document.getElementById('games-list').innerHTML = json.data.map(g => `
+                <div onclick="selectGame(${JSON.stringify(g).replace(/"/g, '&quot;')})" 
+                     class="p-2 bg-slate-800 hover:bg-sky-900 cursor-pointer border-l-2 border-sky-500">
+                    ${g.away_team} @ ${g.home_team}
+                </div>
+            `).join('');
         }
 
-        async function renderChart(id) {
-            const res = await fetch(`${API_BASE_URL}/history/${id}`);
-            const data = await res.json();
-            
+        function selectGame(g) {
+            document.getElementById('game-title').innerText = `${g.away_team} @ ${g.home_team}`;
+            const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
+            const h2h = pin.markets.find(m => m.key === 'h2h');
+            const tot = pin.markets.find(m => m.key === 'totals');
+
+            document.getElementById('h2h-data').innerHTML = h2h.outcomes.map(o => `${o.name}: ${o.price}`).join(' / ');
+            document.getElementById('total-data').innerHTML = tot.outcomes.map(o => `${o.name}: ${o.point}`).join(' / ');
+
             const ctx = document.getElementById('oddsChart').getContext('2d');
-            new Chart(ctx, {
+            if(myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: data.labels,
-                    datasets: [{ label: '水位的變化', data: data.win_odds, borderColor: '#fbbf24' }]
-                }
+                data: { labels: ['Now'], datasets: [{label: 'H2H', data: [h2h.outcomes[0].price], borderColor: '#38bdf8'}] },
+                options: { maintainAspectRatio: false }
             });
         }
-        init();
+        fetchGames();
     </script>
 </body>
 </html>
