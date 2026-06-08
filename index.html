@@ -5,28 +5,23 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #cbd5e1; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #0b1120; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
         .panel { background-color: #1e293b; border: 1px solid #334155; }
+        .game-card { background-color: #162033; border: 1px solid #2d3748; border-radius: 6px; }
     </style>
 </head>
 <body class="p-2 h-screen flex flex-col font-mono text-[11px]">
     <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a]">
-        <h1 class="font-bold text-white tracking-widest text-sm">⚾ MLB PINNACLE TRACKER</h1>
+        <h1 class="font-bold text-white text-sm">MLB PINNACLE TRACKER</h1>
         <div id="status" class="text-sky-400">系統連接中...</div>
     </header>
 
-    <main class="flex-grow grid grid-cols-5 gap-2 p-2 overflow-hidden">
-        <div id="games-list" class="col-span-1 panel overflow-y-auto p-2 space-y-2"></div>
+    <main class="flex-grow grid grid-cols-12 gap-2 p-2 overflow-hidden">
+        <div id="games-list" class="col-span-4 overflow-y-auto space-y-2 pr-2"></div>
         
-        <div class="col-span-4 grid grid-rows-3 gap-2">
-            <div class="row-span-2 panel p-4 flex flex-col">
-                <h2 id="game-title" class="text-white font-bold mb-2">請選擇比賽</h2>
-                <div class="flex-grow min-h-0"><canvas id="oddsChart"></canvas></div>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-                <div class="panel p-4 text-[10px]" id="game-details">詳細資訊</div>
-                <div class="panel p-4 text-[10px]" id="odds-table">盤口資訊</div>
-            </div>
+        <div class="col-span-8 panel p-4 flex flex-col">
+            <h2 id="game-title" class="text-white font-bold mb-4">請點選賽事</h2>
+            <div class="flex-grow min-h-0"><canvas id="oddsChart"></canvas></div>
         </div>
     </main>
 
@@ -36,43 +31,9 @@
             try {
                 const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
                 const json = await res.json();
-                
-                // 1. 顯示最後更新時間 (從後端獲取)
                 document.getElementById("status").innerText = "最後更新: " + (json.last_update || "--:--:--");
                 
                 const list = document.getElementById('games-list');
                 list.innerHTML = json.data.map(g => {
-                    // 2. 處理美東開賽時間
-                    const etTime = new Date(g.commence_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-                    return `
-                        <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}')" 
-                             class="p-2 bg-slate-800 hover:bg-sky-900 cursor-pointer border-l-2 border-sky-500 rounded transition-all">
-                            <div class="text-[11px] font-bold truncate text-white">${g.away_team} VS ${g.home_team}</div>
-                            <div class="text-[9px] text-slate-400 mt-1">美東開賽: ${etTime}</div>
-                        </div>
-                    `;
-                }).join('');
-            } catch(e) { console.error("初始化失敗:", e); }
-        }
-
-        async function selectGame(id, title) {
-            document.getElementById('game-title').innerText = title;
-            const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
-            const data = await res.json();
-            
-            // 繪圖
-            const ctx = document.getElementById('oddsChart').getContext('2d');
-            if (myChart) myChart.destroy();
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: { 
-                    labels: data.map(d => d.time), 
-                    datasets: [{ label: 'Pinnacle Odds', data: data.map(d => d.odds), borderColor: '#38bdf8', borderWidth: 2 }] 
-                },
-                options: { responsive: true, maintainAspectRatio: false, animation: false }
-            });
-        }
-        fetchGames();
-    </script>
-</body>
-</html>
+                    const date = new Date(g.commence_time);
+                    const date
