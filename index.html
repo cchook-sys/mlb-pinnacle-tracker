@@ -12,65 +12,41 @@
 <body class="p-2 h-screen flex gap-2 overflow-hidden">
     
     <div id="sidebar" class="w-1/4 panel overflow-y-auto p-2">
-        <h2 class="text-white font-bold text-sm mb-4 border-b border-slate-700 pb-2">即時賽事列表</h2>
-        <div id="game-list" class="space-y-3"></div>
+        <h2 class="text-white font-bold text-sm mb-4">即時賽事</h2>
+        <div id="game-list">讀取中...</div>
     </div>
 
-    <div class="flex-1 flex flex-col gap-2">
-        <div class="flex-grow panel p-4">
-            <h2 id="game-title" class="text-white font-bold mb-4">請選擇比賽</h2>
-            <div class="relative h-64"><canvas id="oddsChart"></canvas></div>
-        </div>
-        
-        <div class="h-48 grid grid-cols-3 gap-2">
-            <div class="col-span-2 panel p-4" id="odds-info">
-                <h3 class="text-xs font-bold text-slate-400 mb-2">盤口數據</h3>
-                <div id="odds-content" class="text-sm"></div>
-            </div>
-            <div class="col-span-1 panel p-2 flex flex-col">
-                <h3 class="text-xs font-bold text-slate-400 mb-1">系統提示</h3>
-                <div id="chat-box" class="flex-grow overflow-y-auto text-[10px] bg-slate-950 p-1"></div>
-            </div>
-        </div>
+    <div class="flex-1 panel p-4">
+        <canvas id="oddsChart"></canvas>
     </div>
 
     <script>
         const API_BASE_URL = "https://mlb-pinnacle-tracker.onrender.com";
-        let myChart;
 
         async function init() {
-            const res = await fetch(`${API_BASE_URL}/games`);
-            const games = await res.json();
-            document.getElementById('game-list').innerHTML = games.map(g => `
-                <div onclick="renderChart('${g.id}', '${g.away_team} vs ${g.home_team}')" class="panel p-3 border-l-4 border-sky-500 cursor-pointer hover:border-sky-300">
-                    <div class="text-white text-xs font-bold">${g.away_team} vs ${g.home_team}</div>
-                </div>
-            `).join('');
+            try {
+                const res = await fetch(`${API_BASE_URL}/games`);
+                const games = await res.json();
+                document.getElementById('game-list').innerHTML = games.map(g => `
+                    <div onclick="renderChart('${g.id}')" class="panel p-3 cursor-pointer hover:bg-slate-700">
+                        ${g.away_team} vs ${g.home_team}
+                    </div>
+                `).join('');
+            } catch(e) { document.getElementById('game-list').innerText = "API連線失敗"; }
         }
 
-        async function renderChart(id, title) {
-            document.getElementById('game-title').innerText = title;
-            document.getElementById('odds-content').innerText = "載入中...";
-            
+        async function renderChart(id) {
             const res = await fetch(`${API_BASE_URL}/history/${id}`);
             const data = await res.json();
             
-            // 更新下方資訊
-            document.getElementById('odds-content').innerHTML = `H2H: <span class='text-sky-400'>-200</span>`;
-            
-            // 繪製圖表
             const ctx = document.getElementById('oddsChart').getContext('2d');
-            if (myChart) myChart.destroy();
-            myChart = new Chart(ctx, {
+            new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: data.labels,
                     datasets: [{ label: '水位的變化', data: data.win_odds, borderColor: '#fbbf24' }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
+                }
             });
-            
-            document.getElementById('chat-box').innerHTML += `<div class="text-emerald-400">[系統] 已載入 ${title}</div>`;
         }
         init();
     </script>
