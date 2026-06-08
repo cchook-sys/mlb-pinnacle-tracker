@@ -1,52 +1,28 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB PINNACLE TRACKER</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-900 text-white p-6">
-    <h1 class="text-2xl font-bold mb-6">MLB PINNACLE TRACKER</h1>
-    
-    <div id="games-list" class="space-y-4">
-        載入中...
-    </div>
-
-    <script>
-        async function fetchGames() {
-            try {
-                // 1. 發送請求
-                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                const json = await res.json();
-                
-                // 除錯用：在瀏覽器 Console 檢查後端回傳的原始資料
-                console.log("後端傳回的資料:", json);
-
-                // 2. 判斷資料格式並渲染 (簡化後的判斷條件)
-                const container = document.getElementById('games-list');
-                
-                if (json.data && Array.isArray(json.data) && json.data.length > 0) {
-                    container.innerHTML = json.data.map(g => `
-                        <div class="p-4 bg-slate-800 rounded border border-slate-700">
-                            <span class="font-bold">${g.away_team || '客隊'}</span> VS 
-                            <span class="font-bold">${g.home_team || '主隊'}</span>
-                        </div>
-                    `).join('');
-                } else {
-                    container.innerHTML = "目前無賽事資料";
-                }
-            } catch (e) {
-                console.error("抓取錯誤:", e);
-                document.getElementById('games-list').innerHTML = "連線失敗，請檢查 API";
+<script>
+    async function fetchGames() {
+        try {
+            const container = document.getElementById('games-list');
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            
+            // 確認 JSON 有資料
+            if (json.data && json.data.length > 0) {
+                // 直接將資料渲染出來
+                container.innerHTML = json.data.map(g => `
+                    <div class="p-4 bg-slate-800 rounded border border-slate-700 mb-4">
+                        <h2 class="text-xl font-bold">${g.away_team} VS ${g.home_team}</h2>
+                        <p class="text-sm text-slate-400">開賽時間: ${g.commence_time}</p>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = "目前暫無賽事資料";
             }
+        } catch (e) {
+            console.error("抓取失敗:", e);
+            document.getElementById('games-list').innerHTML = "連線失敗，請檢查 API";
         }
+    }
 
-        // --- 最重要的一行：必須呼叫它，程式才會跑 ---
-        fetchGames();
-        
-        // 可選：設定每 60 秒自動更新一次畫面
-        setInterval(fetchGames, 60000);
-    </script>
-</body>
-</html>
+    // 頁面載入時執行
+    fetchGames();
+</script>
