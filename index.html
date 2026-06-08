@@ -5,35 +5,44 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
-        .panel { background-color: #1e293b; border: 1px solid #334155; }
-        .game-card { background-color: #162033; border: 1px solid #2d3748; border-radius: 6px; }
+        body { background-color: #0b1120; color: #cbd5e1; font-family: sans-serif; }
+        .panel { background-color: #162033; border: 1px solid #2d3748; }
     </style>
 </head>
 <body class="p-2 h-screen flex flex-col font-mono text-[11px]">
     <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a]">
         <h1 class="font-bold text-white text-sm">MLB PINNACLE TRACKER</h1>
-        <div id="status" class="text-sky-400">系統連接中...</div>
+        <div id="status" class="text-sky-400">連線中...</div>
     </header>
 
     <main class="flex-grow grid grid-cols-12 gap-2 p-2 overflow-hidden">
         <div id="games-list" class="col-span-4 overflow-y-auto space-y-2 pr-2"></div>
-        
         <div class="col-span-8 panel p-4 flex flex-col">
-            <h2 id="game-title" class="text-white font-bold mb-4">請點選賽事</h2>
-            <div class="flex-grow min-h-0"><canvas id="oddsChart"></canvas></div>
+            <h2 id="game-title" class="text-white font-bold mb-4">請點選左側賽事</h2>
+            <div class="flex-grow"><canvas id="oddsChart"></canvas></div>
         </div>
     </main>
 
     <script>
-        let myChart;
+        // 核心邏輯已精簡，只保留最必要的渲染
         async function fetchGames() {
             try {
                 const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
                 const json = await res.json();
-                document.getElementById("status").innerText = "最後更新: " + (json.last_update || "--:--:--");
-                
-                const list = document.getElementById('games-list');
-                list.innerHTML = json.data.map(g => {
-                    const date = new Date(g.commence_time);
-                    const date
+                document.getElementById("status").innerText = "更新: " + (json.last_update || "--:--");
+                document.getElementById('games-list').innerHTML = json.data.map(g => {
+                    const date = new Date(g.commence_time).toLocaleDateString('zh-TW', {month:'numeric', day:'numeric'});
+                    return `<div class="game-card p-3 panel cursor-pointer hover:border-sky-500">
+                        <div class="text-white font-bold">${g.away_team} VS ${g.home_team}</div>
+                        <div class="flex justify-between text-slate-400 mt-1">
+                            <span>${date}</span>
+                            <button class="bg-rose-900 px-2 rounded">進場</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch(e) { console.error("Load Error"); }
+        }
+        fetchGames();
+    </script>
+</body>
+</html>
