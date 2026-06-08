@@ -7,24 +7,13 @@
     <style>
         body { background-color: #0b1120; color: #cbd5e1; font-family: sans-serif; }
         .panel { background-color: #161e2e; border: 1px solid #1e293b; border-radius: 4px; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     </style>
 </head>
 <body class="p-2 h-screen flex gap-2 overflow-hidden">
-
+    
     <div id="sidebar" class="w-1/4 panel overflow-y-auto p-2 space-y-3">
         <h2 class="text-white font-bold text-sm mb-4 border-b border-slate-700 pb-2">即時賽事列表</h2>
-        <div id="game-list" class="space-y-3">
-            <div onclick="renderChart('g1', 'Giants vs Brewers')" class="panel p-3 border-l-4 border-sky-500 cursor-pointer hover:border-sky-300 transition-all">
-                <div class="text-[10px] text-slate-500 mb-1">06/03 07:40 | ID: 16</div>
-                <div class="text-white font-bold text-xs mb-2">San Francisco Giants VS Milwaukee Brewers</div>
-                <div class="flex justify-between items-center">
-                    <div class="text-[10px]">大小: <span class="text-sky-400">0</span> | 獨贏: <span class="text-amber-400">-36</span></div>
-                    <button class="bg-rose-600 text-white text-[10px] px-3 py-1 rounded">進場</button>
-                </div>
-            </div>
-        </div>
+        <div id="game-list" class="space-y-3"></div>
     </div>
 
     <div class="flex-1 flex flex-col gap-2">
@@ -34,44 +23,35 @@
         </div>
         
         <div class="h-48 grid grid-cols-3 gap-2">
-            <div class="col-span-2 panel p-4">
-                <h3 class="text-xs font-bold text-slate-400 mb-2">盤口水位狀態</h3>
-                <div id="odds-content" class="text-sm">請選擇比賽以查看水位詳情...</div>
-            </div>
-            <div class="col-span-1 panel p-2 flex flex-col">
-                <h3 class="text-xs font-bold text-slate-400 mb-1">系統提示</h3>
-                <div id="chat-box" class="flex-grow overflow-y-auto text-[10px] space-y-1 p-1 bg-slate-950 rounded border border-slate-800">
-                    <div class="text-emerald-400">[系統] 監控系統已就緒</div>
-                </div>
-            </div>
+            <div class="col-span-2 panel p-4"><h3 class="text-xs font-bold text-slate-400">盤口數據</h3><div id="odds-content"></div></div>
+            <div class="col-span-1 panel p-2 flex flex-col"><h3 class="text-xs font-bold text-slate-400">系統提示</h3><div id="chat-box" class="flex-grow overflow-y-auto bg-slate-950 p-1 text-[10px]"></div></div>
         </div>
     </div>
 
     <script>
+        // 設定您的正確網址
+        const API_BASE_URL = "https://mlb-pinnacle-tracker.onrender.com";
         let myChart;
-        // 請務必更新為您在 Render 的網址
-        const API_BASE_URL = "https://YOUR-RENDER-APP-NAME.onrender.com"; 
+
+        async function init() {
+            try {
+                const res = await fetch(`${API_BASE_URL}/games`);
+                const games = await res.json();
+                document.getElementById('game-list').innerHTML = games.map(g => `
+                    <div onclick="renderChart('${g.id}', '${g.away_team} vs ${g.home_team}')" class="panel p-3 border-l-4 border-sky-500 cursor-pointer hover:border-sky-300">
+                        <div class="text-white text-xs font-bold">${g.away_team} vs ${g.home_team}</div>
+                    </div>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
 
         async function renderChart(id, title) {
             document.getElementById('game-title').innerText = title;
-            // 模擬 API 呼叫後的更新
-            document.getElementById('odds-content').innerHTML = `<div class='text-sky-400'>數據載入中...</div>`;
-            
-            const ctx = document.getElementById('oddsChart').getContext('2d');
-            if (myChart) myChart.destroy();
-            
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: ["09:00", "12:00", "16:00"],
-                    datasets: [
-                        { label: '大小分', data: [7.5, 7.5, 7.5], yAxisID: 'y', borderColor: '#38bdf8', borderWidth: 2 },
-                        { label: '獨贏水位', data: [-160, -170, -185], yAxisID: 'y1', borderColor: '#fbbf24', borderDash: [5, 5], borderWidth: 2 }
-                    ]
-                },
-                options: { responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left' }, y1: { position: 'right' } } }
-            });
+            const res = await fetch(`${API_BASE_URL}/history/${id}`);
+            const data = await res.json();
+            // 繪圖與更新內容邏輯...
         }
+        init();
     </script>
 </body>
 </html>
