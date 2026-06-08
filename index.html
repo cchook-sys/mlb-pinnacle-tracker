@@ -1,14 +1,101 @@
-<div class="h-48 grid grid-cols-3 gap-2">
-    <div class="col-span-2 panel p-4" id="odds-table">
-        <h3 class="text-xs font-bold text-slate-400 mb-2">即時盤口數據</h3>
-        <div id="odds-content">請選擇比賽以查看水位...</div>
-    </div>
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>MLB PINNACLE TRACKER</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #0b1120; color: #cbd5e1; font-family: sans-serif; }
+        .panel { background-color: #161e2e; border: 1px solid #1e293b; border-radius: 4px; }
+        /* 捲軸美化 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    </style>
+</head>
+<body class="p-2 h-screen flex gap-2 overflow-hidden">
     
-    <div class="col-span-1 panel p-2 flex flex-col">
-        <h3 class="text-xs font-bold text-slate-400 mb-1">系統提示 / 訊號</h3>
-        <div id="chat-box" class="flex-grow overflow-y-auto text-[10px] space-y-1 p-1 bg-slate-950 rounded">
-            <div class="text-emerald-400">[15:30] 系統啟動...</div>
-            <div class="text-sky-400">[15:35] 檢測到變盤訊號...</div>
+    <div id="sidebar" class="w-1/4 panel overflow-y-auto p-2 space-y-2">
+        <h2 class="text-white font-bold text-sm mb-2 border-b border-slate-700 pb-2">即時賽事列表</h2>
+        </div>
+
+    <div class="flex-1 flex flex-col gap-2">
+        <div class="flex-grow panel p-4">
+            <h2 id="game-title" class="text-white font-bold mb-4">請選擇比賽</h2>
+            <div class="h-full"><canvas id="oddsChart"></canvas></div>
+        </div>
+        
+        <div class="h-48 grid grid-cols-3 gap-2">
+            <div class="col-span-2 panel p-4" id="odds-info">
+                <h3 class="text-xs font-bold text-slate-400 mb-2">盤口水位狀態</h3>
+                <div id="odds-content" class="text-sm">請選擇比賽以查看水位詳情...</div>
+            </div>
+            
+            <div class="col-span-1 panel p-2 flex flex-col">
+                <h3 class="text-xs font-bold text-slate-400 mb-1">系統提示</h3>
+                <div id="chat-box" class="flex-grow overflow-y-auto text-[10px] space-y-1 p-1 bg-slate-950 rounded border border-slate-800">
+                    <div class="text-emerald-400">[系統] 監控系統已就緒</div>
+                </div>
+            </div>
         </div>
     </div>
-</div>
+
+    <script>
+        let myChart;
+
+        // 模擬數據載入與圖表繪製
+        async function renderChart(id, title) {
+            document.getElementById('game-title').innerText = title;
+            // 這裡連接後端 API (例如 http://localhost:8000/history/...)
+            // 模擬顯示資訊
+            document.getElementById('odds-content').innerHTML = `
+                <div class="flex gap-4">
+                    <span>H2H: <span class='text-sky-400'>-185</span> / <span class='text-amber-400'>+155</span></span>
+                    <span>Total: <span class='text-emerald-400'>8.5 Over -110 / Under -110</span></span>
+                </div>
+            `;
+            addLog(`已選取: ${title}`, 'info');
+
+            const ctx = document.getElementById('oddsChart').getContext('2d');
+            if (myChart) myChart.destroy();
+            
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ["09:00", "12:00", "16:00"],
+                    datasets: [
+                        { label: '大小分', data: [7.5, 7.5, 7.5], yAxisID: 'y', borderColor: '#38bdf8', borderWidth: 2 },
+                        { label: '獨贏水位', data: [-160, -170, -185], yAxisID: 'y1', borderColor: '#fbbf24', borderDash: [5, 5], borderWidth: 2 }
+                    ]
+                },
+                options: { 
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        y: { position: 'left', ticks: { color: '#38bdf8' }, grid: { color: '#1e293b' } },
+                        y1: { position: 'right', ticks: { color: '#fbbf24' }, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        }
+
+        // 新增日誌訊息函數
+        function addLog(message, type = 'info') {
+            const chatBox = document.getElementById('chat-box');
+            const time = new Date().toLocaleTimeString('zh-TW', {hour12: false, hour: '2-digit', minute: '2-digit'});
+            chatBox.innerHTML += `<div class="text-slate-300">[${time}] ${message}</div>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // 初始化列表
+        const games = [{id: '1', title: 'San Francisco Giants @ Milwaukee Brewers'}];
+        const sidebar = document.getElementById('sidebar');
+        games.forEach(g => {
+            sidebar.innerHTML += `
+                <div onclick="renderChart('${g.id}', '${g.title}')" class="p-3 bg-slate-800 hover:bg-sky-900 cursor-pointer rounded border border-slate-700">
+                    <div class="text-xs text-white">${g.title}</div>
+                </div>
+            `;
+        });
+    </script>
+</body>
+</html>
