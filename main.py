@@ -1,24 +1,22 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
+from datetime import datetime, timezone, timedelta
 
+os.environ['TZ'] = 'Asia/Taipei'
 app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://cchook-sys.github.io"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+ODDS_API_KEY = "79112bb70773a2cdf998cb3112b18589"
+
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
 
 @app.get("/games")
 async def get_games():
-    # 確保回傳陣列格式，以便前端 .map() 執行
-    return [{"id": "g1", "away_team": "SF", "home_team": "MIL"}]
-
-@app.get("/history/{game_id}")
-async def get_history(game_id: str):
-    # 確保 key 名稱與前端一致
-    return {
-        "labels": ["15:00", "16:00", "17:00"],
-        "win_odds": [-200, -210, -220]
-    }
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
+    async with httpx.AsyncClient(timeout=20) as client:
+        res = await client.get(url)
+        return {"last_update": datetime.now().strftime("%H:%M:%S"), "data": res.json()}
