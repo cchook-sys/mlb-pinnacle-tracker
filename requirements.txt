@@ -1,6 +1,5 @@
 fastapi
 uvicorn
 httpx
+motor
 pymongo
-certifi
-apscheduler
