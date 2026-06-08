@@ -5,45 +5,38 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #cbd5e1; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #0b1120; color: #cbd5e1; }
         .panel { background-color: #1e293b; border: 1px solid #334155; }
     </style>
 </head>
-<body class="p-2 h-screen flex flex-col font-mono">
+<body class="p-2 h-screen flex flex-col font-mono text-xs">
     <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a]">
-        <h1 class="font-bold text-white tracking-widest text-sm">⚾ MLB PINNACLE TRACKER</h1>
-        <div id="status" class="text-sky-400 text-xs">載入中...</div>
+        <h1 class="font-bold text-white text-sm">⚾ MLB PINNACLE TRACKER</h1>
+        <div id="status" class="text-sky-400">系統連接中...</div>
     </header>
 
     <main class="flex-grow grid grid-cols-5 gap-2 p-2 overflow-hidden">
-        <div id="games-list" class="col-span-1 panel overflow-y-auto p-2 space-y-1 text-xs"></div>
-        
+        <div id="games-list" class="col-span-1 panel overflow-y-auto p-2 space-y-1"></div>
         <div class="col-span-4 grid grid-rows-3 gap-2">
             <div class="row-span-2 panel p-4 flex flex-col">
                 <h2 id="game-title" class="text-white font-bold mb-2">請選擇賽事</h2>
                 <div class="flex-grow min-h-0"><canvas id="oddsChart"></canvas></div>
             </div>
-            <div id="details-panel" class="panel p-4 text-xs text-slate-400">
-                請點擊左側賽事以獲取即時盤口數據
-            </div>
+            <div id="details-panel" class="panel p-4">請點擊左側賽事</div>
         </div>
     </main>
 
     <script>
         let myChart;
         async function fetchGames() {
-            try {
-                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                const json = await res.json();
-                document.getElementById("status").innerText = "最後更新: " + json.last_update;
-                const list = document.getElementById('games-list');
-                list.innerHTML = json.data.map(g => `
-                    <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}')" 
-                         class="p-2 bg-slate-800 hover:bg-sky-900 cursor-pointer border-l-2 border-sky-500 rounded">
-                        ${g.away_team} @ ${g.home_team}
-                    </div>
-                `).join('');
-            } catch(e) { console.error("初始化失敗:", e); }
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            document.getElementById('games-list').innerHTML = json.data.map(g => `
+                <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}')" 
+                     class="p-2 bg-slate-800 hover:bg-sky-900 cursor-pointer border-l-2 border-sky-500 rounded text-[10px]">
+                    ${g.away_team} @ ${g.home_team}
+                </div>
+            `).join('');
         }
 
         async function selectGame(id, title) {
@@ -51,9 +44,14 @@
             const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
             const data = await res.json();
             
-            // 繪圖處理 (確保每次繪圖前都先清除舊的 Chart)
+            // 檢查 data 是否為陣列
+            if (!Array.isArray(data)) {
+                console.error("資料格式錯誤，預期陣列但收到:", data);
+                return;
+            }
+
             const ctx = document.getElementById('oddsChart').getContext('2d');
-            if(myChart) myChart.destroy();
+            if (myChart) myChart.destroy();
             myChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -62,7 +60,7 @@
                 },
                 options: { responsive: true, maintainAspectRatio: false }
             });
-            document.getElementById('details-panel').innerText = "數據已載入，監控中...";
+            document.getElementById('details-panel').innerText = "數據已載入";
         }
         fetchGames();
     </script>
