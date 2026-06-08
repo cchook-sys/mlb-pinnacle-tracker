@@ -6,26 +6,28 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { background-color: #0f172a; color: #e2e8f0; }
-        .sidebar { background-color: #1e293b; }
-        .card { background-color: #1e293b; border: 1px solid #334155; }
+        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 8px; }
     </style>
 </head>
-<body class="p-4 h-screen flex flex-col">
-    <header class="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
-        <h1 class="text-xl font-bold text-white">⚾ MLB PINNACLE TRACKER</h1>
+<body class="p-4 h-screen flex flex-col font-sans">
+    <header class="flex justify-between items-center mb-4 pb-2 border-b border-slate-700">
+        <h1 class="text-xl font-bold text-white">⚾ MLB PINNACLE MONITOR</h1>
         <div id="status" class="text-sm font-mono text-sky-400">最後更新: --:--:-- CST</div>
     </header>
 
     <main class="flex-grow grid grid-cols-4 gap-4 overflow-hidden">
-        <div class="sidebar rounded-lg p-3 overflow-y-auto">
-            <h2 id="current-date" class="text-xs font-bold text-slate-400 uppercase mb-3">Today's Games</h2>
-            <div id="games-list" class="space-y-2"></div>
-        </div>
-
+        <div id="games-list" class="col-span-1 overflow-y-auto space-y-2 pr-2"></div>
+        
         <div class="col-span-3 flex flex-col gap-4">
-            <div class="card p-4 h-2/3">
-                <h2 id="game-title" class="text-lg font-bold mb-2">請點擊左側比賽以查看走勢</h2>
-                <canvas id="oddsChart"></canvas>
+            <div class="card p-6 h-full flex flex-col">
+                <h2 id="game-title" class="text-xl font-bold mb-4 text-white">選擇比賽以查看盤口</h2>
+                <div class="flex-grow min-h-0 mb-6">
+                    <canvas id="oddsChart"></canvas>
+                </div>
+                <div id="live-odds" class="grid grid-cols-2 gap-4 p-4 bg-slate-800 rounded-lg border border-slate-700">
+                    <div><p class="text-xs text-slate-400">大小分盤口</p><p id="tot-val" class="text-lg font-bold text-amber-400">--</p></div>
+                    <div><p class="text-xs text-slate-400">當前贏家</p><p id="winner-val" class="text-lg font-bold text-sky-400">--</p></div>
+                </div>
             </div>
         </div>
     </main>
@@ -33,40 +35,37 @@
     <script>
         let myChart;
         async function fetchGames() {
-            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-            const json = await res.json();
-            
-            // 處理日期與時間
-            const dateStr = new Date().toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' });
-            document.getElementById("current-date").innerText = `Today's Games (${dateStr})`;
-            document.getElementById("status").innerText = "最後更新: " + json.last_update + " CST";
-            
-            const list = document.getElementById("games-list");
-            list.innerHTML = json.data.map(g => {
-                // 格式化美東時間 (commence_time)
-                const etTime = new Date(g.commence_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-                return `
-                    <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}')" class="p-3 bg-slate-800 rounded hover:bg-sky-900 cursor-pointer border-l-4 border-sky-500">
-                        <div class="text-sm font-bold">${g.away_team} @ ${g.home_team}</div>
-                        <div class="text-xs text-slate-400">美東開賽: ${etTime}</div>
+            try {
+                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                const json = await res.json();
+                document.getElementById("status").innerText = "最後更新: " + json.last_update;
+                const list = document.getElementById("games-list");
+                list.innerHTML = json.data.map(g => `
+                    <div onclick="loadGame('${g.id}', '${g.away_team} @ ${g.home_team}')" class="p-3 bg-slate-800 rounded cursor-pointer hover:bg-sky-900 border-l-4 border-sky-500">
+                        <div class="text-sm font-bold truncate">${g.away_team} @ ${g.home_team}</div>
                     </div>
-                `;
-            }).join('');
+                `).join('');
+            } catch(e) { console.error(e); }
         }
 
-        async function selectGame(id, title) {
+        async function loadGame(id, title) {
             document.getElementById('game-title').innerText = title;
             const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
             const data = await res.json();
             
+            // 模擬盤口數據 (未來對接 API 的真實數值)
+            document.getElementById('tot-val').innerText = "8.5"; 
+            document.getElementById('winner-val').innerText = "客隊領先";
+
             const ctx = document.getElementById('oddsChart').getContext('2d');
             if(myChart) myChart.destroy();
             myChart = new Chart(ctx, {
                 type: 'line',
                 data: { 
                     labels: data.map(d => d.time), 
-                    datasets: [{ label: 'Pinnacle Odds', data: data.map(d => d.odds), borderColor: '#38bdf8', tension: 0.3 }] 
-                }
+                    datasets: [{ label: 'Pinnacle Water', data: data.map(d => d.odds), borderColor: '#38bdf8', tension: 0.3 }] 
+                },
+                options: { maintainAspectRatio: false }
             });
         }
         fetchGames();
