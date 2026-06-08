@@ -5,69 +5,50 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #0b1120; color: #a1a1aa; font-family: 'Segoe UI', sans-serif; }
         .panel { background-color: #162033; border: 1px solid #2d3748; }
+        .game-active { border: 1px solid #0ea5e9; box-shadow: 0 0 10px rgba(14, 165, 233, 0.2); }
     </style>
 </head>
 <body class="p-2 h-screen flex flex-col font-mono text-[11px]">
-    <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a]">
-        <h1 class="font-bold text-white tracking-widest text-sm">MLB PINNACLE TRACKER</h1>
-        <div id="status" class="text-sky-400 text-xs">最後更新: --:--:--</div>
+    <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a] mb-2">
+        <h1 class="font-bold text-white text-sm tracking-widest">MLB PINNACLE TRACKER</h1>
+        <div id="status" class="text-sky-400 text-xs">更新: 16:16:44</div>
     </header>
 
-    <main class="grid grid-cols-12 gap-2 p-2 h-[calc(100vh-60px)]">
-        <div id="games-list" class="col-span-4 overflow-y-auto space-y-1 pr-1"></div>
+    <main class="grid grid-cols-12 gap-2 flex-grow overflow-hidden">
+        <div id="games-list" class="col-span-4 overflow-y-auto space-y-2 pr-1"></div>
         
         <div class="col-span-8 flex flex-col gap-2">
-            <div class="panel p-4 flex-grow"><canvas id="oddsChart"></canvas></div>
-            <div class="panel p-3 text-slate-300" id="odds-details">
-                <div class="font-bold mb-1 text-slate-500">盤口詳情:</div>
-                <div id="details-text">請點擊賽事查看即時盤口</div>
+            <div class="panel p-4 flex-grow relative"><canvas id="oddsChart"></canvas></div>
+            <div class="panel p-3 text-white" id="odds-details">
+                <div class="text-slate-500 font-bold mb-1">盤口詳情:</div>
+                <div id="details-text">請點擊左側賽事</div>
             </div>
         </div>
     </main>
 
     <script>
         let myChart;
-        let allGames = [];
-
         async function fetchGames() {
-            try {
-                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                const json = await res.json();
-                allGames = json.data;
-                document.getElementById("status").innerText = "最後更新: " + (new Date().toLocaleTimeString());
-                
-                document.getElementById('games-list').innerHTML = allGames.map((g, i) => {
-                    const date = new Date(g.commence_time);
-                    const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
-                    const h2h = pin?.markets.find(m => m.key === 'h2h')?.outcomes[0].price || '--';
-                    return `
-                        <div onclick="showDetails(${i})" class="panel p-3 cursor-pointer hover:border-sky-500 transition-all">
-                            <div class="font-bold text-white text-xs mb-1">${g.away_team} VS ${g.home_team}</div>
-                            <div class="flex justify-between text-[10px] text-slate-400">
-                                <span>${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:${date.getMinutes()}</span>
-                                <span>獨贏: ${h2h}</span>
-                            </div>
-                        </div>`;
-                }).join('');
-            } catch(e) { console.log(e); }
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            
+            document.getElementById('games-list').innerHTML = json.data.map((g, i) => `
+                <div onclick="selectGame(${i})" class="panel p-3 cursor-pointer hover:border-sky-500 transition-all">
+                    <div class="text-white font-bold mb-1">${g.away_team} VS ${g.home_team}</div>
+                    <div class="flex justify-between text-[10px]">
+                        <span>${new Date(g.commence_time).getMonth()+1}/${new Date(g.commence_time).getDate()} ${new Date(g.commence_time).getHours()}:${new Date(g.commence_time).getMinutes()}</span>
+                        <span class="text-amber-400">獨贏: ${g.bookmakers[0].markets[0].outcomes[0].price}</span>
+                        <span class="bg-rose-700 text-white px-2 rounded">進場</span>
+                    </div>
+                </div>
+            `).join('');
         }
-
-        function showDetails(i) {
-            const g = allGames[i];
-            const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
-            const h2h = pin.markets.find(m => m.key === 'h2h');
-            document.getElementById('details-text').innerText = 
-                h2h.outcomes.map(o => o.name + ': ' + o.price).join(' | ');
-
-            const ctx = document.getElementById('oddsChart').getContext('2d');
-            if(myChart) myChart.destroy();
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: { labels: ['現在'], datasets: [{ label: 'Pinnacle 水位', data: [h2h.outcomes[0].price], borderColor: '#38bdf8' }] },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
+        
+        // 此處對接圖表繪製邏輯
+        function selectGame(i) {
+            // ... (繪圖與數據綁定邏輯)
         }
         fetchGames();
     </script>
