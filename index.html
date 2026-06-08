@@ -5,66 +5,65 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #cbd5e1; font-family: 'Segoe UI', sans-serif; }
-        .panel { background-color: #1e293b; border: 1px solid #334155; }
+        body { background-color: #0b1120; color: #cbd5e1; }
+        .panel { background-color: #161e2e; border: 1px solid #1e293b; border-radius: 4px; }
     </style>
 </head>
-<body class="p-2 h-screen flex flex-col font-mono text-[11px]">
-    <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a]">
-        <h1 class="font-bold text-white tracking-widest text-sm">⚾ MLB PINNACLE TRACKER</h1>
-        <div id="status" class="text-sky-400">系統連接中...</div>
-    </header>
+<body class="flex h-screen p-4 gap-4 overflow-hidden font-sans">
+    <div id="sidebar" class="w-1/3 flex flex-col gap-2 overflow-y-auto">
+        <h2 class="text-white font-bold p-2">即時賽事</h2>
+    </div>
 
-    <main class="flex-grow grid grid-cols-5 gap-2 p-2 overflow-hidden">
-        <div id="games-list" class="col-span-1 panel overflow-y-auto p-2 space-y-1"></div>
-        <div class="col-span-4 grid grid-rows-3 gap-2">
-            <div class="row-span-2 panel p-4 flex flex-col">
-                <h2 id="game-title" class="text-white font-bold mb-2">請選擇比賽</h2>
-                <div class="flex-grow"><canvas id="oddsChart"></canvas></div>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-                <div class="panel p-4" id="game-details">詳細資訊：請選擇比賽</div>
-                <div class="panel p-4" id="odds-table">盤口數據：請選擇比賽</div>
-            </div>
+    <div class="flex-1 flex flex-col">
+        <div class="panel p-6 flex-grow">
+            <h2 id="chart-title" class="text-white font-bold text-lg mb-4">請從左側選擇比賽</h2>
+            <canvas id="myChart"></canvas>
         </div>
-    </main>
+    </div>
 
     <script>
         let myChart;
-        async function fetchGames() {
-            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-            const json = await res.json();
-            document.getElementById("status").innerText = "最後更新: " + json.last_update;
-            document.getElementById('games-list').innerHTML = json.data.map(g => `
-                <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}')" class="p-2 bg-slate-800 rounded cursor-pointer hover:bg-sky-900 border-l-2 border-sky-500">
-                    ${g.away_team} @ ${g.home_team}
-                </div>
-            `).join('');
+        async function init() {
+            const res = await fetch("http://localhost:8000/games");
+            const games = await res.json();
+            const sidebar = document.getElementById('sidebar');
+            games.forEach(g => {
+                sidebar.innerHTML += `
+                    <div onclick="renderChart('${g.id}', '${g.teams}')" class="panel p-4 cursor-pointer hover:bg-slate-800 transition">
+                        <div class="text-white font-medium">${g.teams}</div>
+                        <div class="text-xs text-slate-500">${g.time}</div>
+                    </div>
+                `;
+            });
         }
 
-        async function selectGame(id, title) {
-            document.getElementById('game-title').innerText = title;
-            const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
+        async function renderChart(id, title) {
+            document.getElementById('chart-title').innerText = title;
+            const res = await fetch(`http://localhost:8000/history/${id}`);
             const data = await res.json();
             
-            document.getElementById('game-details').innerHTML = `H2H: <span class='text-sky-400'>${data.details.h2h_phi}</span> / <span class='text-amber-400'>${data.details.h2h_lad}</span>`;
-            document.getElementById('odds-table').innerHTML = `Total ${data.details.point}: <span class='text-emerald-400'>Over ${data.details.total_over} / Under ${data.details.total_under}</span>`;
-
-            const ctx = document.getElementById('oddsChart').getContext('2d');
+            const ctx = document.getElementById('myChart').getContext('2d');
             if (myChart) myChart.destroy();
+
             myChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.lines.map(d => d.time),
+                    labels: data.labels,
                     datasets: [
-                        { label: 'PHI', data: data.lines.map(d => d.phi), borderColor: '#38bdf8' },
-                        { label: 'LAD', data: data.lines.map(d => d.lad), borderColor: '#fbbf24' }
+                        { label: '大小分', data: data.over_under, yAxisID: 'y', borderColor: '#38bdf8', borderWidth: 2, stepped: true },
+                        { label: '主獨贏', data: data.win_odds, yAxisID: 'y1', borderColor: '#fbbf24', borderDash: [5, 5], borderWidth: 2 }
                     ]
                 },
-                options: { maintainAspectRatio: false, scales: { y: { ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' } } } }
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        y: { position: 'left', ticks: { color: '#38bdf8' }, grid: { color: '#1e293b' } },
+                        y1: { position: 'right', ticks: { color: '#fbbf24' }, grid: { drawOnChartArea: false } }
+                    }
+                }
             });
         }
-        fetchGames();
+        init();
     </script>
 </body>
 </html>
