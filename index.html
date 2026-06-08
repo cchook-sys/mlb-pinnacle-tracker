@@ -1,69 +1,48 @@
 <!DOCTYPE html>
-<html lang="zh-TW" class="dark">
+<html class="dark">
 <head>
-    <meta charset="UTF-8">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #cbd5e1; }
-        .panel { background-color: #161e2e; border: 1px solid #1e293b; border-radius: 4px; }
+        body { background-color: #0b101b; color: #94a3b8; }
+        .panel { background-color: #111827; border: 1px solid #1f2937; }
     </style>
 </head>
-<body class="flex h-screen p-4 gap-4 overflow-hidden font-sans">
-    <div id="sidebar" class="w-1/3 flex flex-col gap-2 overflow-y-auto">
-        <h2 class="text-white font-bold p-2">即時賽事</h2>
-    </div>
-
-    <div class="flex-1 flex flex-col">
-        <div class="panel p-6 flex-grow">
-            <h2 id="chart-title" class="text-white font-bold text-lg mb-4">請從左側選擇比賽</h2>
-            <canvas id="myChart"></canvas>
+<body class="flex h-screen p-2 gap-2">
+    <div id="list" class="w-1/3 space-y-2 overflow-y-auto">
+        <div class="panel p-4 border-l-4 border-sky-500">
+            <div class="text-white font-bold">San Francisco Giants VS Milwaukee Brewers</div>
+            <div class="flex justify-between text-xs mt-2">
+                <span>大小: 0</span> <span>獨贏: -36</span>
+                <button class="bg-rose-600 text-white px-2 rounded">進場</button>
+            </div>
         </div>
     </div>
 
+    <div class="flex-1 panel p-4">
+        <h2 class="text-white font-bold mb-4">San Francisco Giants VS Milwaukee Brewers</h2>
+        <canvas id="mainChart"></canvas>
+    </div>
+
     <script>
-        let myChart;
-        async function init() {
-            const res = await fetch("http://localhost:8000/games");
-            const games = await res.json();
-            const sidebar = document.getElementById('sidebar');
-            games.forEach(g => {
-                sidebar.innerHTML += `
-                    <div onclick="renderChart('${g.id}', '${g.teams}')" class="panel p-4 cursor-pointer hover:bg-slate-800 transition">
-                        <div class="text-white font-medium">${g.teams}</div>
-                        <div class="text-xs text-slate-500">${g.time}</div>
-                    </div>
-                `;
-            });
-        }
-
-        async function renderChart(id, title) {
-            document.getElementById('chart-title').innerText = title;
-            const res = await fetch(`http://localhost:8000/history/${id}`);
-            const data = await res.json();
-            
-            const ctx = document.getElementById('myChart').getContext('2d');
-            if (myChart) myChart.destroy();
-
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: data.labels,
-                    datasets: [
-                        { label: '大小分', data: data.over_under, yAxisID: 'y', borderColor: '#38bdf8', borderWidth: 2, stepped: true },
-                        { label: '主獨贏', data: data.win_odds, yAxisID: 'y1', borderColor: '#fbbf24', borderDash: [5, 5], borderWidth: 2 }
-                    ]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    scales: {
-                        y: { position: 'left', ticks: { color: '#38bdf8' }, grid: { color: '#1e293b' } },
-                        y1: { position: 'right', ticks: { color: '#fbbf24' }, grid: { drawOnChartArea: false } }
-                    }
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ["15:35", "16:14", "17:06", "18:24", "19:29", "21:00", "22:18", "23:10"],
+                datasets: [
+                    { label: '大小分', data: [7.5, 7.5, 7.5, 7.5, 7.5, 7.5, 7.5, 7.5], yAxisID: 'y', borderColor: '#38bdf8', borderWidth: 2 },
+                    { label: '主獨贏', data: [-205, -200, -210, -205, -200, -205, -202, -240], yAxisID: 'y1', borderColor: '#fbbf24', borderDash: [5, 5], borderWidth: 2 }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { position: 'left', ticks: { color: '#38bdf8' } },
+                    y1: { position: 'right', ticks: { color: '#fbbf24' } }
                 }
-            });
-        }
-        init();
+            }
+        });
     </script>
 </body>
 </html>
