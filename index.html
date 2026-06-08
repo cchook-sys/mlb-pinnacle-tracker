@@ -1,48 +1,14 @@
-<!DOCTYPE html>
-<html class="dark">
-<head>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { background-color: #0b101b; color: #94a3b8; }
-        .panel { background-color: #111827; border: 1px solid #1f2937; }
-    </style>
-</head>
-<body class="flex h-screen p-2 gap-2">
-    <div id="list" class="w-1/3 space-y-2 overflow-y-auto">
-        <div class="panel p-4 border-l-4 border-sky-500">
-            <div class="text-white font-bold">San Francisco Giants VS Milwaukee Brewers</div>
-            <div class="flex justify-between text-xs mt-2">
-                <span>大小: 0</span> <span>獨贏: -36</span>
-                <button class="bg-rose-600 text-white px-2 rounded">進場</button>
-            </div>
+<div class="h-48 grid grid-cols-3 gap-2">
+    <div class="col-span-2 panel p-4" id="odds-table">
+        <h3 class="text-xs font-bold text-slate-400 mb-2">即時盤口數據</h3>
+        <div id="odds-content">請選擇比賽以查看水位...</div>
+    </div>
+    
+    <div class="col-span-1 panel p-2 flex flex-col">
+        <h3 class="text-xs font-bold text-slate-400 mb-1">系統提示 / 訊號</h3>
+        <div id="chat-box" class="flex-grow overflow-y-auto text-[10px] space-y-1 p-1 bg-slate-950 rounded">
+            <div class="text-emerald-400">[15:30] 系統啟動...</div>
+            <div class="text-sky-400">[15:35] 檢測到變盤訊號...</div>
         </div>
     </div>
-
-    <div class="flex-1 panel p-4">
-        <h2 class="text-white font-bold mb-4">San Francisco Giants VS Milwaukee Brewers</h2>
-        <canvas id="mainChart"></canvas>
-    </div>
-
-    <script>
-        const ctx = document.getElementById('mainChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ["15:35", "16:14", "17:06", "18:24", "19:29", "21:00", "22:18", "23:10"],
-                datasets: [
-                    { label: '大小分', data: [7.5, 7.5, 7.5, 7.5, 7.5, 7.5, 7.5, 7.5], yAxisID: 'y', borderColor: '#38bdf8', borderWidth: 2 },
-                    { label: '主獨贏', data: [-205, -200, -210, -205, -200, -205, -202, -240], yAxisID: 'y1', borderColor: '#fbbf24', borderDash: [5, 5], borderWidth: 2 }
-                ]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    y: { position: 'left', ticks: { color: '#38bdf8' } },
-                    y1: { position: 'right', ticks: { color: '#fbbf24' } }
-                }
-            }
-        });
-    </script>
-</body>
-</html>
+</div>
