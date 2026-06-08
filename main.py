@@ -1,35 +1,25 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import httpx
 from datetime import datetime, timezone, timedelta
 
-os.environ['TZ'] = 'Asia/Taipei'
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-ODDS_API_KEY = "79112bb70773a2cdf998cb3112b18589"
-
 @app.get("/games")
 async def get_games():
-    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
-    async with httpx.AsyncClient(timeout=20) as client:
-        res = await client.get(url)
-        tw_time = datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M:%S")
-        return {"last_update": tw_time, "data": res.json()}
+    # 模擬賽事列表數據
+    return [
+        {"id": "g1", "teams": "Toronto Blue Jays VS Atlanta Braves", "time": "06/03 07:15"},
+        {"id": "g2", "teams": "San Francisco Giants VS Milwaukee Brewers", "time": "06/03 07:40"},
+        {"id": "g3", "teams": "Chicago White Sox VS Minnesota Twins", "time": "06/03 07:40"}
+    ]
 
 @app.get("/history/{game_id}")
 async def get_history(game_id: str):
-    # 此處回傳與照片版面相符的數據格式
+    # 對應圖片的雙軸數據：labels 為時間軸，over_under 為左軸數據，win_odds 為右軸數據
     return {
-        "lines": [
-            {"time": "09:00", "phi": -160, "lad": +150},
-            {"time": "12:00", "phi": -170, "lad": +140},
-            {"time": "16:00", "phi": -185, "lad": +155}
-        ],
-        "details": {
-            "h2h_phi": -185, "h2h_lad": +155, 
-            "total_over": -110, "total_under": -110, 
-            "point": 8.5
-        }
+        "labels": ["15:35", "16:14", "17:06", "18:11", "19:29", "21:00", "22:18", "23:10"],
+        "over_under": [7.5, 7.5, 7.5, 7.5, 7.5, 7.5, 7.5, 7.5],
+        "win_odds": [-205, -200, -210, -205, -200, -205, -202, -240]
     }
