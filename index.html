@@ -1,0 +1,56 @@
+<script>
+    let myChart;
+
+    // 確保 HTML 結構完全載入後再執行
+    document.addEventListener("DOMContentLoaded", () => {
+        fetchGames();
+    });
+
+    async function fetchGames() {
+        try {
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            
+            const list = document.getElementById('games-list');
+            if (!list) return; // 防呆機制，找不到列表就不執行
+
+            document.getElementById("status").innerText = "最後更新: " + (json.last_update || "--:--:--");
+            
+            list.innerHTML = json.data.map(g => `
+                <div onclick="selectGame('${g.id}', '${g.away_team} @ ${g.home_team}', '${g.away_team}', '${g.home_team}')" 
+                     class="p-3 bg-slate-800 rounded cursor-pointer hover:bg-sky-900 border-l-4 border-sky-500 mb-2">
+                    <div class="text-sm font-bold truncate text-white">${g.away_team} @ ${g.home_team}</div>
+                </div>
+            `).join('');
+        } catch(e) { 
+            console.error("初始化失敗:", e); 
+        }
+    }
+
+    window.selectGame = async function(id, title, away, home) {
+        document.getElementById('game-title').innerText = title;
+        
+        try {
+            const res = await fetch(`https://mlb-pinnacle-tracker.onrender.com/history/${id}`);
+            const data = await res.json();
+            
+            // 更新下方數據
+            document.getElementById('odds-table').innerHTML = `
+                <div class="p-3 bg-slate-800 rounded text-sm text-slate-300">客隊: ${away} (-150)</div>
+                <div class="p-3 bg-slate-800 rounded text-sm text-slate-300">主隊: ${home} (+130)</div>
+            `;
+
+            // 繪圖
+            const ctx = document.getElementById('oddsChart').getContext('2d');
+            if (window.myChart) window.myChart.destroy();
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: { 
+                    labels: data.map(d => d.time), 
+                    datasets: [{ label: 'Pinnacle Odds', data: data.map(d => d.odds), borderColor: '#38bdf8', tension: 0.1 }] 
+                },
+                options: { responsive: true, maintainAspectRatio: false, animation: false }
+            });
+        } catch (err) { console.error("載入失敗:", err); }
+    };
+</script>
