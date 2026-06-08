@@ -5,42 +5,61 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0b1120; color: #cbd5e1; font-family: sans-serif; }
+        body { background-color: #0b1120; color: #e2e8f0; }
         .panel { background-color: #162033; border: 1px solid #2d3748; }
     </style>
 </head>
 <body class="p-2 h-screen flex flex-col font-mono text-[11px]">
-    <header class="flex justify-between items-center px-4 py-2 border-b border-slate-700 bg-[#0f172a]">
-        <h1 class="font-bold text-white text-sm">MLB PINNACLE TRACKER</h1>
-        <div id="status" class="text-sky-400">連線中...</div>
-    </header>
-
-    <main class="flex-grow grid grid-cols-12 gap-2 p-2 overflow-hidden">
-        <div id="games-list" class="col-span-4 overflow-y-auto space-y-2 pr-2"></div>
-        <div class="col-span-8 panel p-4 flex flex-col">
-            <h2 id="game-title" class="text-white font-bold mb-4">請點選左側賽事</h2>
-            <div class="flex-grow"><canvas id="oddsChart"></canvas></div>
+    <main class="grid grid-cols-12 gap-2 h-full overflow-hidden">
+        <div id="games-list" class="col-span-4 overflow-y-auto space-y-2 pr-1"></div>
+        
+        <div class="col-span-8 flex flex-col gap-2">
+            <div class="panel p-4 flex-grow"><canvas id="oddsChart"></canvas></div>
+            <div class="panel p-4 h-32" id="odds-details">點擊賽事查看詳細盤口</div>
         </div>
     </main>
 
     <script>
-        // 核心邏輯已精簡，只保留最必要的渲染
+        let myChart;
         async function fetchGames() {
-            try {
-                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                const json = await res.json();
-                document.getElementById("status").innerText = "更新: " + (json.last_update || "--:--");
-                document.getElementById('games-list').innerHTML = json.data.map(g => {
-                    const date = new Date(g.commence_time).toLocaleDateString('zh-TW', {month:'numeric', day:'numeric'});
-                    return `<div class="game-card p-3 panel cursor-pointer hover:border-sky-500">
-                        <div class="text-white font-bold">${g.away_team} VS ${g.home_team}</div>
-                        <div class="flex justify-between text-slate-400 mt-1">
-                            <span>${date}</span>
-                            <button class="bg-rose-900 px-2 rounded">進場</button>
+            const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+            const json = await res.json();
+            document.getElementById('games-list').innerHTML = json.data.map(g => {
+                const date = new Date(g.commence_time);
+                const dateStr = `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:${date.getMinutes()}`;
+                // 獲取盤口數據
+                const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
+                const h2h = pin.markets.find(m => m.key === 'h2h')?.outcomes[0].price || '--';
+                return `
+                    <div onclick="selectGame(${JSON.stringify(g).replace(/"/g, '&quot;')})" 
+                         class="panel p-3 cursor-pointer hover:border-sky-500 transition-colors">
+                        <div class="font-bold text-white">${g.away_team} VS ${g.home_team}</div>
+                        <div class="flex justify-between text-slate-400 mt-2">
+                            <span>${dateStr}</span>
+                            <span>獨贏: ${h2h}</span>
                         </div>
                     </div>`;
-                }).join('');
-            } catch(e) { console.error("Load Error"); }
+            }).join('');
+        }
+
+        function selectGame(g) {
+            const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
+            const h2h = pin.markets.find(m => m.key === 'h2h');
+            
+            // 更新下方資訊欄
+            document.getElementById('odds-details').innerHTML = `
+                <div class="font-bold text-white mb-1">盤口詳情:</div>
+                <div>獨贏: ${h2h.outcomes.map(o => o.name + ': ' + o.price).join(' | ')}</div>
+            `;
+
+            // 更新圖表 (這裡用目前的數值模擬)
+            const ctx = document.getElementById('oddsChart').getContext('2d');
+            if(myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: ['現在'], datasets: [{ label: 'Pinnacle 水位', data: [h2h.outcomes[0].price], borderColor: '#38bdf8' }] },
+                options: { maintainAspectRatio: false }
+            });
         }
         fetchGames();
     </script>
