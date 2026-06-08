@@ -1,17 +1,35 @@
-async function fetchGames() {
-    try {
-        const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-        const json = await res.json();
-        
-        // 加入檢查：如果 data 為空或是陣列不存在，顯示提示
-        if (!json.data || json.data.length === 0) {
-            document.getElementById('games-list').innerHTML = `<div class="p-4 text-center">目前無賽事數據，請稍後再試</div>`;
-            return;
-        }
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>MLB Pinnacle Tracker</title>
+</head>
+<body class="bg-slate-900 text-white p-4">
+    <h1 class="text-xl font-bold mb-4">MLB PINNACLE TRACKER</h1>
+    <div id="games-list" class="space-y-2">載入中...</div>
 
-        // 正常渲染
-        document.getElementById('games-list').innerHTML = json.data.map(g => `...`).join('');
-    } catch(e) {
-        document.getElementById('games-list').innerHTML = `<div class="p-4 text-center text-rose-500">連線失敗</div>`;
-    }
-}
+    <script>
+        async function fetchGames() {
+            try {
+                // 確保網址與後端網域一致
+                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                const json = await res.json();
+                
+                if (json.status === "ok" && json.data.length > 0) {
+                    document.getElementById('games-list').innerHTML = json.data.map(g => `
+                        <div class="p-4 bg-slate-800 rounded border border-slate-700">
+                            ${g.away_team} VS ${g.home_team}
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('games-list').innerHTML = "目前無賽事資料";
+                }
+            } catch(e) {
+                document.getElementById('games-list').innerHTML = "連線失敗，請檢查 API";
+            }
+        }
+        fetchGames();
+    </script>
+</body>
+</html>
