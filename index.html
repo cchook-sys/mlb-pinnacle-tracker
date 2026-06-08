@@ -1,33 +1,17 @@
-<script>
-    async function fetchGames() {
+async function fetchGames() {
+    try {
         const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
         const json = await res.json();
-        document.getElementById("status").innerText = "最後更新: " + (json.last_update || "--:--");
         
-        const list = document.getElementById('games-list');
-        list.innerHTML = json.data.map(g => {
-            // 提取 Pinnacle 盤口數據
-            const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
-            const h2h = pin?.markets.find(m => m.key === 'h2h')?.outcomes[0].price || 0;
-            const tot = pin?.markets.find(m => m.key === 'totals')?.outcomes[0].point || 0;
-            
-            // 格式化日期與時間
-            const d = new Date(g.commence_time);
-            const dateStr = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
+        // 加入檢查：如果 data 為空或是陣列不存在，顯示提示
+        if (!json.data || json.data.length === 0) {
+            document.getElementById('games-list').innerHTML = `<div class="p-4 text-center">目前無賽事數據，請稍後再試</div>`;
+            return;
+        }
 
-            return `
-                <div onclick="selectGame('${g.id}', '${g.away_team} VS ${g.home_team}')" 
-                     class="panel p-3 cursor-pointer hover:border-sky-500 transition-all flex flex-col items-center text-center">
-                    <div class="text-[9px] text-slate-500 mb-1">${dateStr}</div>
-                    
-                    <div class="font-bold text-white text-[11px] mb-2">${g.away_team} VS ${g.home_team}</div>
-                    
-                    <div class="flex gap-4 text-[10px] w-full justify-center">
-                        <span class="text-sky-400">大小: ${tot}</span>
-                        <span class="text-amber-400">獨贏: ${h2h > 0 ? '+' + h2h : h2h}</span>
-                        <button class="bg-rose-800 text-white px-2 rounded ml-2">進場</button>
-                    </div>
-                </div>`;
-        }).join('');
+        // 正常渲染
+        document.getElementById('games-list').innerHTML = json.data.map(g => `...`).join('');
+    } catch(e) {
+        document.getElementById('games-list').innerHTML = `<div class="p-4 text-center text-rose-500">連線失敗</div>`;
     }
-</script>
+}
