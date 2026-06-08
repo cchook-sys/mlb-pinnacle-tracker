@@ -26,49 +26,53 @@
     </div>
 
     <script>
-        let allGames = []; // 暫存所有賽事資料
+        let allGames = [];
 
-        async function fetchGames() {
-            try {
-                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                const json = await res.json();
-                
-                if (json.data && json.data.length > 0) {
-                    allGames = json.data;
-                    const container = document.getElementById('games-list');
-                    container.innerHTML = json.data.map(g => `
-                        <div class="p-4 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:border-blue-500 transition" 
-                             onclick="showDetails('${g.id}')">
-                            <h2 class="text-xl font-bold">${g.away_team} VS ${g.home_team}</h2>
-                            <p class="text-sm text-slate-400">開賽: ${new Date(g.commence_time).toLocaleString()}</p>
-                        </div>
-                    `).join('');
+        document.addEventListener('DOMContentLoaded', () => {
+            async function fetchGames() {
+                const container = document.getElementById('games-list');
+                try {
+                    const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                    const json = await res.json();
+                    
+                    if (json.data && json.data.length > 0) {
+                        allGames = json.data;
+                        container.innerHTML = json.data.map(g => `
+                            <div class="p-4 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:border-blue-500 transition" 
+                                 onclick="showDetails('${g.id}')">
+                                <h2 class="text-xl font-bold">${g.away_team} VS ${g.home_team}</h2>
+                                <p class="text-sm text-slate-400">開賽: ${new Date(g.commence_time).toLocaleString()}</p>
+                            </div>
+                        `).join('');
+                    } else {
+                        container.innerHTML = "<p class='text-center'>目前暫無賽事資料</p>";
+                    }
+                } catch (e) {
+                    console.error("抓取失敗:", e);
+                    container.innerHTML = "<p class='text-center text-red-400'>連線失敗，請檢查 API</p>";
                 }
-            } catch (e) {
-                console.error("抓取失敗:", e);
             }
-        }
 
-        function showDetails(gameId) {
-            const game = allGames.find(g => g.id === gameId);
-            if (!game) return;
+            window.showDetails = (gameId) => {
+                const game = allGames.find(g => g.id === gameId);
+                if (!game) return;
 
-            document.getElementById('modal-title').innerText = `${game.away_team} vs ${game.home_team}`;
-            document.getElementById('modal-content').innerHTML = `
-                <p><strong>聯盟:</strong> ${game.sport_title}</p>
-                <p><strong>賽事 ID:</strong> ${game.id}</p>
-                <p><strong>書商數量:</strong> ${game.bookmakers ? game.bookmakers.length : 0}</p>
-            `;
-            document.getElementById('game-modal').classList.add('active');
-        }
+                document.getElementById('modal-title').innerText = `${game.away_team} vs ${game.home_team}`;
+                document.getElementById('modal-content').innerHTML = `
+                    <p><strong>聯盟:</strong> ${game.sport_title}</p>
+                    <p><strong>賽事 ID:</strong> ${game.id}</p>
+                    <p><strong>書商數量:</strong> ${game.bookmakers ? game.bookmakers.length : 0}</p>
+                `;
+                document.getElementById('game-modal').classList.add('active');
+            };
 
-        function closeModal() {
-            document.getElementById('game-modal').classList.remove('active');
-        }
+            window.closeModal = () => {
+                document.getElementById('game-modal').classList.remove('active');
+            };
 
-        // 初始化與定期更新
-        fetchGames();
-        setInterval(fetchGames, 60000);
+            fetchGames();
+            setInterval(fetchGames, 60000);
+        });
     </script>
 </body>
 </html>
