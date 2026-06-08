@@ -1,10 +1,11 @@
 import os
 import asyncio
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
-from bson import json_util # 確保能正確處理 MongoDB 的特殊格式
+from bson import json_util
 import json
 
 app = FastAPI()
@@ -24,19 +25,32 @@ client = AsyncIOMotorClient(MONGO_URI)
 db = client.mlb_tracker
 history_col = db.odds_history
 
-# 背景任務：每 10 分鐘抓取一次
+# 你的 The Odds API 設定
+API_KEY = "你的_API_KEY_填在這裡" # <--- 請務必填入你的 API Key
+
 async def fetch_odds_task():
     while True:
         try:
             print(f"[{datetime.now()}] 開始執行背景抓取...")
-            # --- 這裡放入你的實際抓取邏輯 ---
-            # 確保資料有寫入 history_col
-            # 範例測試寫入：
-            # await history_col.insert_one({"away_team": "Dodgers", "home_team": "Giants", "time": datetime.now()})
-            print("背景任務執行完畢")
+            
+            # 使用 httpx 進行非同步 API 呼叫
+            async with httpx.AsyncClient() as client_http:
+                url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={API_KEY}&regions=us&markets=h2h"
+                response = await client_http.get(url)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # 將抓到的資料寫入 MongoDB
+                    if data:
+                        await history_col.insert_many(data)
+                        print(f"成功寫入 {len(data)} 筆資料到 MongoDB")
+                else:
+                    print(f"API 請求失敗: {response.status_code}")
+                    
         except Exception as e:
             print(f"背景任務錯誤: {e}")
-        await asyncio.sleep(600)
+            
+        await asyncio.sleep(600) # 每 10 分鐘抓一次
 
 @app.on_event("startup")
 async def startup_event():
@@ -45,16 +59,11 @@ async def startup_event():
 
 @app.get("/games")
 async def get_games():
-    # 撈取最新 5 筆資料
-    cursor = history_col.find().sort("_id", -1).limit(5)
-    data = await cursor.to_list(length=5)
-    
-    # 除錯用：在 Render Log 印出撈到的資料
-    print(f"後端撈到的資料: {data}")
-    
-    # 轉換 MongoDB 物件為 JSON 可讀格式
+    # 撈取最新 20 筆資料
+    cursor = history_col.find().sort("_id", -1).limit(20)
+    data = await cursor.to_list(length=20)
     return {"data": json.loads(json_util.dumps(data))}
 
-@app.get("/trigger-fetch")
-async def trigger_fetch():
-    return {"message": "正在執行測試抓取..."}
+@app.get("/")
+def read_root():
+    return {"message": "MLB Tracker API 運作中"}
