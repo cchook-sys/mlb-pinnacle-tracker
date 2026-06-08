@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
 
 app = FastAPI()
 
-# 設定 CORS，確保前端 GitHub Pages 可以存取
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -11,13 +11,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 定義根目錄，解決 404
+# 你的 API Key (請確保這是從 The Odds API 申請的有效 Key)
+API_KEY = "79112bb70773a2cdf998cb3112b18589"
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "API is running"}
 
-# 定義 games 路由
 @app.get("/games")
-def get_games():
-    # 暫時回傳測試資料，確保路由通暢
-    return {"status": "ok", "data": []}
+async def get_games():
+    # 呼叫 The Odds API 獲取 MLB 賽事賠率
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url)
+            return {"status": "ok", "data": response.json()}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
