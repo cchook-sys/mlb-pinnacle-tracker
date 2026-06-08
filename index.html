@@ -1,33 +1,33 @@
-async function selectGame(i) {
-    const g = allGames[i];
-    const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
-    const h2h = pin.markets.find(m => m.key === 'h2h');
-    
-    // 1. 補上「主獨贏」數據顯示
-    const homeTeam = g.home_team;
-    const homeOdds = h2h.outcomes.find(o => o.name === homeTeam)?.price || '--';
-    
-    document.getElementById('details-text').innerHTML = `
-        <div class="text-white">主隊 (${homeTeam}) 獨贏水位: <span class="text-amber-400 font-bold">${homeOdds}</span></div>
-        <div class="text-[10px] text-slate-500 mt-1">最後回傳: ${new Date().toLocaleTimeString()}</div>
-    `;
+<script>
+    async function fetchGames() {
+        const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+        const json = await res.json();
+        document.getElementById("status").innerText = "最後更新: " + (json.last_update || "--:--");
+        
+        const list = document.getElementById('games-list');
+        list.innerHTML = json.data.map(g => {
+            // 提取 Pinnacle 盤口數據
+            const pin = g.bookmakers.find(b => b.key === 'pinnacle') || g.bookmakers[0];
+            const h2h = pin?.markets.find(m => m.key === 'h2h')?.outcomes[0].price || 0;
+            const tot = pin?.markets.find(m => m.key === 'totals')?.outcomes[0].point || 0;
+            
+            // 格式化日期與時間
+            const d = new Date(g.commence_time);
+            const dateStr = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`;
 
-    // 2. 繪製圖表 (補上每10分鐘的歷史模擬點)
-    // 注意：若要真正顯示 10 分鐘回傳紀錄，後端需儲存歷史點位，目前我們先用數值填充
-    const ctx = document.getElementById('oddsChart').getContext('2d');
-    if(myChart) myChart.destroy();
-    
-    myChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: ['16:00', '16:10', '16:20', '16:30'], // 模擬 10 分鐘間隔
-            datasets: [{
-                label: '主獨贏水位變化',
-                data: [homeOdds - 5, homeOdds - 2, homeOdds, homeOdds + 3], // 模擬數據點
-                borderColor: '#fbbf24',
-                tension: 0.3
-            }]
-        },
-        options: { responsive: true, maintainAspectRatio: false }
-    });
-}
+            return `
+                <div onclick="selectGame('${g.id}', '${g.away_team} VS ${g.home_team}')" 
+                     class="panel p-3 cursor-pointer hover:border-sky-500 transition-all flex flex-col items-center text-center">
+                    <div class="text-[9px] text-slate-500 mb-1">${dateStr}</div>
+                    
+                    <div class="font-bold text-white text-[11px] mb-2">${g.away_team} VS ${g.home_team}</div>
+                    
+                    <div class="flex gap-4 text-[10px] w-full justify-center">
+                        <span class="text-sky-400">大小: ${tot}</span>
+                        <span class="text-amber-400">獨贏: ${h2h > 0 ? '+' + h2h : h2h}</span>
+                        <button class="bg-rose-800 text-white px-2 rounded ml-2">進場</button>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+</script>
