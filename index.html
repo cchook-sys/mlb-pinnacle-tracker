@@ -1,27 +1,27 @@
 async function fetchData() {
     const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    btn.disabled = true; 
-    st.innerHTML = '正在更新...';
+    btn.disabled = true; st.innerHTML = '正在刷新...';
     
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const json = await res.json();
         
-        // 【除錯關鍵】在 Console 印出原始結構，請確認後端回傳的是直接的陣列還是 {data: []}
-        console.log("後端回傳原始數據:", json);
+        // 【關鍵除錯】請務必在瀏覽器檢查這裡印出的 json 結構
+        console.log("後端回傳數據:", json);
 
-        // 如果你的資料是放在 json.data 裡，請改用 json.data；如果直接就是陣列，用 json
-        const gameList = Array.isArray(json) ? json : (json.data || []);
-
-        allGames = gameList.map(item => {
-            // 請依照 Console 中看到的真實路徑調整
-            // 如果資料在 item.data 裡面，就用 item.data.home_team
+        // 如果 json 本身就是陣列，直接用；如果資料在 json.data 裡，用 json.data
+        const rawList = Array.isArray(json) ? json : (json.data || []);
+        
+        allGames = rawList.map(item => {
+            // 如果後端儲存格式是 { "data": { "home": "..." } }，請用 item.data
+            // 如果後端儲存格式直接是 { "home": "..." }，請直接用 item
             const d = item.data || item; 
             return {
                 home: d.home_team || d.home || 'Unknown',
                 away: d.away_team || d.away || 'Unknown',
                 commence_time: d.commence_time || '',
+                // 根據你上一次的截圖，這些可能是 null，我們補上 || 0
                 total: d.total || 0,
                 over_price: d.over_price || 0,
                 under_price: d.under_price || 0,
@@ -30,8 +30,8 @@ async function fetchData() {
             };
         });
         
-        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
         renderToday();
+        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
     } catch(e) {
         console.error("fetchData 錯誤:", e);
         st.innerHTML = '<span class="text-red-400">連線失敗</span>';
