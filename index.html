@@ -29,7 +29,7 @@
         <div id="view-today" class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
             <table class="w-full text-left min-w-[980px]">
                 <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
-                    <tr><th class="p-4">時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">賠率 (O/U)</th><th class="p-4">獨贏 (主/客)</th></tr>
+                    <tr><th class="p-4">開賽時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">賠率 (O/U)</th><th class="p-4">獨贏 (主/客)</th></tr>
                 </thead>
                 <tbody id="today-tbody" class="divide-y divide-gray-800/50"></tbody>
             </table>
@@ -37,9 +37,6 @@
 
         <div id="view-history" class="hidden bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
             <table class="w-full text-left min-w-[900px]">
-                <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
-                    <tr><th class="p-4">比賽</th><th class="p-4">結果</th></tr>
-                </thead>
                 <tbody id="history-tbody" class="divide-y divide-gray-800/50"></tbody>
             </table>
         </div>
@@ -52,27 +49,23 @@ let allGames = [];
 async function fetchData() {
     const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    btn.disabled = true; st.innerHTML = '更新中...';
+    btn.disabled = true; st.innerHTML = '正在更新...';
     
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const data = await res.json();
         
-        // 【已修正路徑】根據你的 Console 資料結構直接映射
-        // 資料在 item.data 內，total 等數值直接在該層級
-        allGames = (Array.isArray(data) ? data : (data.data || [])).map(item => {
-            const d = item.data || item; 
-            return {
-                home: d.home || 'Unknown',
-                away: d.away || 'Unknown',
-                commence_time: d.commence_time || '',
-                total: d.total || 0,
-                over_price: d.over_price || 0,
-                under_price: d.under_price || 0,
-                ml_home: d.ml_home || 0,
-                ml_away: d.ml_away || 0
-            };
-        });
+        // 【關鍵修正】根據你的截圖，資料直接在 item 中，欄位為 home_team, away_team, total, over_price 等
+        allGames = (Array.isArray(data) ? data : []).map(item => ({
+            home: item.home_team || 'Unknown',
+            away: item.away_team || 'Unknown',
+            commence_time: item.commence_time || '', // 保持原始時間格式
+            total: item.total || 0,
+            over_price: item.over_price || 0,
+            under_price: item.under_price || 0,
+            ml_home: item.ml_home_price || 0, // 對應截圖中的 ml_home_price
+            ml_away: item.ml_away_price || 0  // 對應截圖中的 ml_away_price
+        }));
         
         st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
         renderToday();
@@ -88,13 +81,13 @@ function renderToday() {
     const tbody = document.getElementById('today-tbody');
     tbody.innerHTML = allGames.length > 0 ? allGames.map(g => `
         <tr class="hover:bg-[#172a45]/30 text-sm border-b border-gray-800/50">
-            <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
+            <td class="p-4 text-gray-300">${g.commence_time}</td>
             <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal text-xs">${g.away}</span></td>
             <td class="p-4 font-black text-white text-lg">${g.total}</td>
             <td class="p-4 text-xs"><span class="text-orange-400">O:${g.over_price}</span> / <span class="text-cyan-400">U:${g.under_price}</span></td>
             <td class="p-4 text-xs">主:${g.ml_home} / 客:${g.ml_away}</td>
         </tr>
-    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">尚無盤口數據</td></tr>';
+    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">暫無資料</td></tr>';
 }
 
 function switchTab(tab) {
