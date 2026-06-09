@@ -1,42 +1,117 @@
-async function fetchData() {
-    const btn = document.getElementById('refresh-btn');
-    const st = document.getElementById('status-text');
-    btn.disabled = true; 
-    st.innerHTML = '正在更新...';
-    
-    try {
-        const res = await fetch(API + '/games', { cache: 'no-cache' });
-        const json = await res.json();
-        
-        // --- 【關鍵除錯】強制印出資料結構 ---
-        // 請務必在瀏覽器 Console 查看此處輸出的內容
-        console.log("=== API 返回的原始資料 ===");
-        console.log(json); 
-        // ------------------------------------
-        
-        // 嘗試自動處理資料層級
-        const rawList = Array.isArray(json) ? json : (json.data || []);
-        
-        allGames = rawList.map(item => {
-            const d = item.data || item; // 假設資料可能在 .data 屬性內
-            return {
-                home: d.home_team || d.home || 'Unknown',
-                away: d.away_team || d.away || 'Unknown',
-                commence_time: d.commence_time || '',
-                total: d.total || d.total_points || 0,
-                over_price: d.over_price || d.over || 0,
-                under_price: d.under_price || d.under || 0,
-                ml_home: d.ml_home_price || d.ml_home || 0,
-                ml_away: d.ml_away_price || d.ml_away || 0
-            };
-        });
-        
-        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
-        renderToday();
-    } catch(e) {
-        console.error("fetchData 錯誤:", e);
-        st.innerHTML = '<span class="text-red-400">連線失敗</span>';
-    } finally {
-        btn.disabled = false;
-    }
-}
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLBENTRY v4 - Pinnacle 盤口監控</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes pulse-g { 0%,100%{opacity:1} 50%{opacity:.35} }
+        @keyframes steam { 0%,100%{opacity:1} 50%{opacity:.5} }
+        .anim-spin { animation: spin 1s linear infinite; display:inline-block; }
+        .anim-pulse { animation: pulse-g 1.4s ease-in-out infinite; }
+        .anim-steam { animation: steam 1.5s ease-in-out infinite; }
+        .conf-bar { height:3px; background:#1e3a5f; border-radius:2px; overflow:hidden; }
+        .conf-fill { height:100%; border-radius:2px; transition:width .6s ease; }
+        .tab-btn { transition: all .2s; }
+        .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
+    </style>
+</head>
+<body class="p-4 md:p-6">
+    <div class="max-w-7xl mx-auto space-y-5">
+
+        <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5">
+            <div>
+                <div class="flex items-center gap-3">
+                    <h1 class="text-3xl font-black tracking-wider text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
+                    <span class="text-xs bg-gray-800 text-gray-400 px-2.5 py-1 rounded font-mono border border-gray-700">v4.0</span>
+                </div>
+                <div class="text-sm mt-2 flex flex-wrap gap-x-4 gap-y-1 items-center">
+                    <span class="text-gray-400">ET <span id="et-clock" class="text-blue-400 font-mono font-bold">--:--:--</span></span>
+                    <span class="text-gray-600">|</span>
+                    <span class="text-gray-400">場次 <span id="games-count" class="text-white font-mono font-bold">0</span></span>
+                    <span class="text-gray-600">|</span>
+                    <span id="status-text" class="text-xs text-gray-500">連線中...</span>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-lg font-bold text-sm transition-all flex items-center gap-2">
+                    <span id="refresh-icon">↺</span> <span id="btn-text">更新盤口</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="view-today" class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
+            <div class="overflow-x-auto no-scrollbar">
+                <table class="w-full text-left border-collapse min-w-[980px]">
+                    <thead>
+                        <tr class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-800">
+                            <th class="p-4">開賽時間 ET</th>
+                            <th class="p-4">對陣球隊</th>
+                            <th class="p-4">大小分</th>
+                            <th class="p-4">移動幅度</th>
+                            <th class="p-4">Over / Under</th>
+                            <th class="p-4">獨贏 ML</th>
+                            <th class="p-4">狀態</th>
+                        </tr>
+                    </thead>
+                    <tbody id="today-tbody" class="divide-y divide-gray-800/50">
+                        <tr><td colspan="7" class="text-center p-12 text-gray-500">載入中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'https://mlb-pinnacle-tracker.onrender.com';
+        let allGames = [];
+
+        // 格式化工具
+        const fmtOdds = n => n==null||n==='-' ? '—' : n>0 ? '+'+n : ''+n;
+        const fmtET = iso => new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
+        const minsUntil = iso => Math.round((new Date(iso)-Date.now())/60000);
+
+        async function fetchData() {
+            const btn = document.getElementById('refresh-btn');
+            const txt = document.getElementById('btn-text');
+            btn.disabled = true; txt.textContent = '更新中...';
+            try {
+                const res = await fetch(API + '/games');
+                allGames = await res.json();
+                document.getElementById('games-count').textContent = allGames.length;
+                document.getElementById('status-text').innerHTML = '<span class="text-green-400">● 已連線</span>';
+                renderToday();
+            } catch(e) {
+                document.getElementById('status-text').textContent = '連線失敗';
+            } finally {
+                btn.disabled = false; txt.textContent = '更新盤口';
+            }
+        }
+
+        function renderToday() {
+            const tbody = document.getElementById('today-tbody');
+            tbody.innerHTML = allGames.map(g => {
+                const cur = g.latest?.total ?? '—';
+                const open = g.open?.total ?? '—';
+                
+                return `<tr class="hover:bg-[#172a45]/30 transition-colors text-sm border-b border-gray-800/50">
+                    <td class="p-4 font-mono text-gray-300">${fmtET(g.commence_time)}</td>
+                    <td class="p-4"><div class="font-bold text-white">${g.home}</div><div class="text-gray-400 text-xs">${g.away}</div></td>
+                    <td class="p-4 font-extrabold text-white text-lg font-mono">${cur}</td>
+                    <td class="p-4 font-mono text-xs">開盤: ${open}</td>
+                    <td class="p-4 font-mono text-xs text-orange-300">O ${g.latest?.over_juice || '—'} / U ${g.latest?.under_juice || '—'}</td>
+                    <td class="p-4 font-mono text-xs text-gray-300">主 ${fmtOdds(g.latest?.ml_home)} / 客 ${fmtOdds(g.latest?.ml_away)}</td>
+                    <td class="p-4 text-xs text-gray-500">已快照: ${g.snapshot_count||0}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
