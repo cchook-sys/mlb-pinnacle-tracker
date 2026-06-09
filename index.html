@@ -1,37 +1,37 @@
 async function fetchData() {
     const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    btn.disabled = true; st.innerHTML = '正在刷新...';
+    btn.disabled = true; 
+    st.innerHTML = '正在更新...';
     
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const json = await res.json();
         
-        // 【關鍵除錯】請務必在瀏覽器檢查這裡印出的 json 結構
-        console.log("後端回傳數據:", json);
+        // 【關鍵除錯】請務必打開瀏覽器 F12 -> Console，點開這條 Log 檢查結構
+        console.log("後端回傳的完整資料結構:", json);
 
-        // 如果 json 本身就是陣列，直接用；如果資料在 json.data 裡，用 json.data
+        // 自動適應結構：不管回傳的是 {data: [...]} 還是 [...]
         const rawList = Array.isArray(json) ? json : (json.data || []);
         
         allGames = rawList.map(item => {
-            // 如果後端儲存格式是 { "data": { "home": "..." } }，請用 item.data
-            // 如果後端儲存格式直接是 { "home": "..." }，請直接用 item
+            // 這裡我們嘗試用多種可能的路徑去讀取，這樣不管後端怎麼存，都能抓到
             const d = item.data || item; 
             return {
                 home: d.home_team || d.home || 'Unknown',
                 away: d.away_team || d.away || 'Unknown',
                 commence_time: d.commence_time || '',
-                // 根據你上一次的截圖，這些可能是 null，我們補上 || 0
-                total: d.total || 0,
-                over_price: d.over_price || 0,
-                under_price: d.under_price || 0,
+                // 這裡我們把所有可能的欄位名稱都列出來嘗試，確保不會抓到 0
+                total: d.total || d.total_points || 0,
+                over_price: d.over_price || d.over || 0,
+                under_price: d.under_price || d.under || 0,
                 ml_home: d.ml_home_price || d.ml_home || 0,
                 ml_away: d.ml_away_price || d.ml_away || 0
             };
         });
         
-        renderToday();
         st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
+        renderToday();
     } catch(e) {
         console.error("fetchData 錯誤:", e);
         st.innerHTML = '<span class="text-red-400">連線失敗</span>';
