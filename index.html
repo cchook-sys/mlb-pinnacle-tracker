@@ -1,21 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLBENTRY v4 - Pinnacle 盤口監控</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .anim-spin { animation: spin 1s linear infinite; display:inline-block; }
+        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
+    </style>
+</head>
+<body class="p-4 md:p-6">
+<div class="max-w-7xl mx-auto space-y-5">
+    <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex justify-between items-center">
+        <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
+        <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm">更新盤口</button>
+    </div>
+    
+    <div class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
+        <table class="w-full text-left min-w-[980px]">
+            <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
+                <tr><th class="p-4">時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">O/U 賠率</th><th class="p-4">獨贏</th></tr>
+            </thead>
+            <tbody id="today-tbody" class="divide-y divide-gray-800/50"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+const API = 'https://mlb-pinnacle-tracker.onrender.com';
+let allGames = [];
+
 async function fetchData() {
     const btn = document.getElementById('refresh-btn');
-    const st = document.getElementById('status-text');
-
-    // 強制顯示正在更新
-    st.innerHTML = '<span class="text-yellow-400">正在刷新數據...</span>';
-    btn.disabled = true;
-
+    btn.disabled = true; btn.innerHTML = '<span class="anim-spin">↺</span> 更新中...';
+    
     try {
         const res = await fetch(API + '/games');
         const json = await res.json();
         
-        // 【除錯檢查】在 Console 印出後端回傳的原始結構
-        console.log("後端回傳資料:", json);
-
-        // 如果 json.data 是陣列，直接賦值
-        allGames = Array.isArray(json.data) ? json.data.map(item => {
-            const d = item.data;
+        // 【核心修正】這裡將後端簡化的資料對應到前端邏輯
+        allGames = (json.data || []).map(item => {
+            const d = item.data; // 後端傳回的結構
             return {
                 id: item.game_id,
                 home: d.home,
@@ -28,22 +57,32 @@ async function fetchData() {
                     ml_home: d.ml_home,
                     ml_away: d.ml_away
                 },
-                snapshot_count: 1, // 預設值
-                history: [{total: d.total}]
+                history: [{total: d.total}] // 初始化歷史數據以防報錯
             };
-        }) : [];
-
-        // 渲染畫面
-        renderToday();
+        });
         
-        // 更新狀態文字
-        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
-        document.getElementById('games-count').textContent = allGames.length;
-
+        renderToday();
     } catch(e) {
-        console.error("fetchData 錯誤:", e);
-        st.innerHTML = '<span class="text-red-400">連線失敗，請檢查 Console</span>';
+        console.error(e);
     } finally {
-        btn.disabled = false;
+        btn.disabled = false; btn.innerHTML = '更新盤口';
     }
 }
+
+function renderToday() {
+    const tbody = document.getElementById('today-tbody');
+    tbody.innerHTML = allGames.map(g => `
+        <tr class="hover:bg-[#172a45]/30 text-sm">
+            <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
+            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal">${g.away}</span></td>
+            <td class="p-4 font-black text-white">${g.latest.total || '-'}</td>
+            <td class="p-4 text-xs">O:${g.latest.over_juice} / U:${g.latest.under_juice}</td>
+            <td class="p-4 text-xs">主:${g.latest.ml_home} / 客:${g.latest.ml_away}</td>
+        </tr>
+    `).join('');
+}
+
+fetchData();
+</script>
+</body>
+</html>
