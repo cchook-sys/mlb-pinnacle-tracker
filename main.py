@@ -21,15 +21,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-ODDS_API_KEY  = os.getenv("ODDS_API_KEY", "")
+# 使用 os.environ.get 強制從環境變數讀取
+ODDS_API_KEY  = os.environ.get("ODDS_API_KEY")
+
+if not ODDS_API_KEY:
+    log.error("CRITICAL: ODDS_API_KEY environment variable is NOT set!")
+else:
+    log.info(f"Using API Key: {ODDS_API_KEY[:4]}****")
+
 MONGO_URI     = os.getenv("MONGO_URI", "")
 SPORT         = "baseball_mlb"
 BOOKMAKER     = "pinnacle"
 ODDS_BASE     = "https://api.the-odds-api.com/v4"
 SCORES_URL    = f"{ODDS_BASE}/sports/{SPORT}/scores/?apiKey={ODDS_API_KEY}&daysFrom=1&dateFormat=iso"
 ODDS_URL      = (f"{ODDS_BASE}/sports/{SPORT}/odds/"
-                 f"?apiKey={ODDS_API_KEY}&regions=us"
-                 f"&markets=h2h,totals,spreads&bookmakers={BOOKMAKER}&oddsFormat=american")
+                  f"?apiKey={ODDS_API_KEY}&regions=us"
+                  f"&markets=h2h,totals,spreads&bookmakers={BOOKMAKER}&oddsFormat=american")
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
 client  = None
@@ -176,7 +183,7 @@ async def fetch_and_settle():
                 return
             scores = r.json()
 
-        ts        = utc_now()
+        ts       = utc_now()
         yesterday = et_date_str(ts - timedelta(days=1))
         snaps_coll= get_db()["snapshots"]
         hist_coll = get_db()["history"]
@@ -305,18 +312,18 @@ async def get_games():
         last  = snaps[-1] if snaps else {}
         sig   = signal_from_snaps(snaps)
         result.append({
-            "game_id":        d["game_id"],
-            "home":           d["home"],
-            "away":           d["away"],
-            "commence_time":  d["commence_time"],
+            "game_id":       d["game_id"],
+            "home":          d["home"],
+            "away":          d["away"],
+            "commence_time": d["commence_time"],
             "snapshot_count": len(snaps),
             "open":  {"total": first.get("total"), "ml_home": first.get("ml_home"), "ml_away": first.get("ml_away")},
             "latest":{"total": last.get("total"),  "over_juice": last.get("over_juice"), "under_juice": last.get("under_juice"), "ml_home": last.get("ml_home"), "ml_away": last.get("ml_away"), "spread_home": last.get("spread_home")},
             "delta": {"total": sig["delta"], "ml": 0},
             "signal":{"total": sig["total"], "ml": sig["ml"]},
             "history":[{"ts": s["ts"].isoformat() if hasattr(s["ts"],"isoformat") else str(s["ts"]), "total": s.get("total"), "over_juice": s.get("over_juice"), "under_juice": s.get("under_juice"), "ml_home": s.get("ml_home"), "ml_away": s.get("ml_away")} for s in snaps],
-            "result":         d.get("result"),
-            "actual_total":   d.get("actual_total"),
+            "result":        d.get("result"),
+            "actual_total":  d.get("actual_total"),
         })
     return result
 
@@ -329,33 +336,4 @@ async def get_history():
     result    = []
     for d in docs:
         result.append({
-            "game_id":       d["game_id"],
-            "home":          d["home"],
-            "away":          d["away"],
-            "commence_time": d["commence_time"],
-            "date":          d["date"],
-            "open_total":    d.get("open_total"),
-            "close_total":   d.get("close_total"),
-            "total_delta":   d.get("total_delta", 0),
-            "pick":          d.get("pick"),
-            "actual_total":  d.get("actual_total"),
-            "result":        d.get("result"),
-            "signal":        d.get("signal", {}),
-        })
-    return result
-
-@app.get("/stats")
-async def get_stats():
-    """Win/loss stats from history"""
-    coll  = get_db()["history"]
-    docs  = await coll.find({"result": {"$in": ["WIN","LOSS","PUSH"]}}).to_list(200)
-    wins  = sum(1 for d in docs if d.get("result")=="WIN")
-    losses= sum(1 for d in docs if d.get("result")=="LOSS")
-    pushes= sum(1 for d in docs if d.get("result")=="PUSH")
-    total = wins + losses
-    return {
-        "wins": wins, "losses": losses, "pushes": pushes,
-        "total": total + pushes,
-        "win_rate": round(wins/total*100,1) if total>0 else 0,
-        "roi": round((wins*0.91 - losses)/total*100,1) if total>0 else 0,
-    }
+            "game_id
