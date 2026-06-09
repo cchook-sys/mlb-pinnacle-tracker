@@ -1,100 +1,51 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MLBENTRY v4 - Pinnacle 盤口監控</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  .no-scrollbar::-webkit-scrollbar { display: none; }
-  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-  @keyframes pulse-g { 0%,100%{opacity:1} 50%{opacity:.35} }
-  @keyframes steam   { 0%,100%{opacity:1} 50%{opacity:.5} }
-  .anim-spin  { animation: spin 1s linear infinite; display:inline-block; }
-  .anim-pulse { animation: pulse-g 1.4s ease-in-out infinite; }
-  .anim-steam { animation: steam 1.5s ease-in-out infinite; }
-  .conf-bar   { height:3px; background:#1e3a5f; border-radius:2px; overflow:hidden; }
-  .conf-fill  { height:100%; border-radius:2px; transition:width .6s ease; }
-  .tab-btn { transition: all .2s; }
-  .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
-</style>
-</head>
-<body class="p-4 md:p-6">
-<div class="max-w-7xl mx-auto space-y-5">
-    <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-start gap-5">
-      <div>
-        <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
-        <div id="status-text" class="text-xs text-gray-500 mt-2">連線中...</div>
-      </div>
-      <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm">更新盤口</button>
-    </div>
-
-    <div id="view-today" class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
-        <table class="w-full text-left border-collapse min-w-[980px]">
-            <thead>
-                <tr class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase border-b border-gray-800">
-                    <th class="p-4">開賽時間</th>
-                    <th class="p-4">對陣球隊</th>
-                    <th class="p-4">大小分</th>
-                    <th class="p-4">O / U 賠率</th>
-                    <th class="p-4">獨贏 ML</th>
-                    <th class="p-4 text-center">狀態</th>
-                </tr>
-            </thead>
-            <tbody id="today-tbody" class="divide-y divide-gray-800/50"></tbody>
-        </table>
-    </div>
-</div>
-
-<script>
-const API = 'https://mlb-pinnacle-tracker.onrender.com';
-let allGames = [];
-
 async function fetchData() {
+    const btn = document.getElementById('refresh-btn');
+    const st = document.getElementById('status-text');
+
+    btn.disabled = true;
+    st.innerHTML = '更新中...';
+
     try {
         const res = await fetch(API + '/games');
-        const json = await res.json();
+        const result = await res.json();
         
-        // 【核心修正】將後端簡化後的資料「映射」回原本渲染邏輯期待的結構
-        allGames = json.data.map(item => {
-            const d = item.data;
+        // 【關鍵修正】：確保 allGames 永遠是一個陣列
+        // 檢查 API 回傳結構 (假設 API 回傳 {data: [...]})
+        const rawData = result.data || result || []; 
+        
+        // 將資料重新整理成前端需要的格式 (包含預設值防止 .reduce 報錯)
+        allGames = rawData.map(item => {
+            const d = item.data || {};
             return {
                 id: item.game_id,
-                home: d.home,
-                away: d.away,
+                home: d.home || 'Unknown',
+                away: d.away || 'Unknown',
                 commence_time: d.commence_time,
+                snapshot_count: item.snapshot_count || 0,
+                // 補上預設結構，防止後續計算報錯
                 latest: {
-                    total: d.total,
-                    over_juice: d.over_price,
-                    under_juice: d.under_price,
-                    ml_home: d.ml_home,
-                    ml_away: d.ml_away
+                    total: d.total || 0,
+                    over_juice: d.over_price || 0,
+                    under_juice: d.under_price || 0,
+                    ml_home: d.ml_home || 0,
+                    ml_away: d.ml_away || 0
                 },
-                history: [{total: d.total}] // 初始化歷史陣列避免報錯
+                history: [{total: d.total || 0}] 
             };
         });
+
+        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
+        document.getElementById('games-count').textContent = allGames.length;
+        
+        // 現在 allGames 保證是陣列了，reduce 就不會報錯
+        document.getElementById('snaps-count').textContent = allGames.reduce((s, g) => s + (g.snapshot_count || 0), 0);
+
         renderToday();
-    } catch(e) { console.error(e); }
+        fetchStats();
+    } catch(e) {
+        console.error(e);
+        st.innerHTML = '<span class="text-red-400">數據格式錯誤</span>';
+    } finally {
+        btn.disabled = false;
+    }
 }
-
-function renderToday() {
-    const tbody = document.getElementById('today-tbody');
-    tbody.innerHTML = allGames.map(g => {
-        const cur = g.latest;
-        return `<tr class="hover:bg-[#172a45]/30 text-sm">
-            <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
-            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal">${g.away}</span></td>
-            <td class="p-4 font-black text-white">${cur.total}</td>
-            <td class="p-4 text-xs">O:${cur.over_juice} / U:${cur.under_juice}</td>
-            <td class="p-4 text-xs">主:${cur.ml_home} / 客:${cur.ml_away}</td>
-            <td class="p-4 text-center">正常</td>
-        </tr>`;
-    }).join('');
-}
-
-fetchData();
-</script>
-</body>
-</html>
