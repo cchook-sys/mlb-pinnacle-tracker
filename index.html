@@ -7,9 +7,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, sans-serif; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .anim-spin { animation: spin 1s linear infinite; display:inline-block; }
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         .tab-btn { transition: all .2s; cursor: pointer; }
         .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
     </style>
@@ -35,8 +32,7 @@
                     <tr><th class="p-4">時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">賠率 (O/U)</th><th class="p-4">獨贏 (主/客)</th></tr>
                 </thead>
                 <tbody id="today-tbody" class="divide-y divide-gray-800/50">
-                    <tr><td colspan="5" class="p-10 text-center text-gray-500">點擊更新盤口以載入資料</td></tr>
-                </tbody>
+                    </tbody>
             </table>
         </div>
 
@@ -65,11 +61,9 @@ async function fetchData() {
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const json = await res.json();
-        console.log("後端回傳資料:", json); // 除錯用
         
         allGames = (json.data || []).map(item => {
             const d = item.data || {};
-            // 橋接邏輯：後端 MongoDB 結構 -> 前端渲染結構
             return {
                 home: d.home || '—',
                 away: d.away || '—',
@@ -88,7 +82,7 @@ async function fetchData() {
         st.innerHTML = '<span class="text-green-400 font-bold">● 已連線 Pinnacle</span>';
     } catch(e) {
         console.error("fetchData 錯誤:", e);
-        st.innerHTML = '<span class="text-red-400">連線失敗，請檢查 Console</span>';
+        st.innerHTML = '<span class="text-red-400">連線失敗</span>';
     } finally {
         btn.disabled = false;
     }
@@ -96,12 +90,14 @@ async function fetchData() {
 
 function renderToday() {
     const tbody = document.getElementById('today-tbody');
+    if (!tbody) return;
+
     tbody.innerHTML = allGames.length > 0 ? allGames.map(g => `
         <tr class="hover:bg-[#172a45]/30 text-sm border-b border-gray-800/50">
-            <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
-            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal">${g.away}</span></td>
-            <td class="p-4 font-black text-white">${g.latest.total}</td>
-            <td class="p-4 text-xs">O:${g.latest.over_juice} / U:${g.latest.under_juice}</td>
+            <td class="p-4 text-gray-300">${g.commence_time ? g.commence_time.substring(11, 16) : '--:--'}</td>
+            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal text-xs">${g.away}</span></td>
+            <td class="p-4 font-black text-white text-lg">${g.latest.total}</td>
+            <td class="p-4 text-xs"><span class="text-orange-400">O:${g.latest.over_juice}</span> / <span class="text-cyan-400">U:${g.latest.under_juice}</span></td>
             <td class="p-4 text-xs">主:${g.latest.ml_home} / 客:${g.latest.ml_away}</td>
         </tr>
     `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">目前無盤口資料</td></tr>';
