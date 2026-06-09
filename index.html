@@ -16,7 +16,7 @@
         <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-center gap-5">
             <div>
                 <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
-                <div id="status-text" class="text-xs text-gray-500 mt-2">準備連線...</div>
+                <div id="status-text" class="text-xs text-gray-500 mt-2">連線中...</div>
             </div>
             <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm hover:bg-blue-500 transition-all">更新盤口</button>
         </div>
@@ -38,7 +38,7 @@
         <div id="view-history" class="hidden bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
             <table class="w-full text-left min-w-[900px]">
                 <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
-                    <tr><th class="p-4">比賽</th><th class="p-4">開盤</th><th class="p-4">收盤</th><th class="p-4">結果</th></tr>
+                    <tr><th class="p-4">比賽</th><th class="p-4">結果</th></tr>
                 </thead>
                 <tbody id="history-tbody" class="divide-y divide-gray-800/50"></tbody>
             </table>
@@ -52,34 +52,29 @@ let allGames = [];
 async function fetchData() {
     const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    btn.disabled = true; 
-    st.innerHTML = '正在刷新...';
+    btn.disabled = true; st.innerHTML = '更新中...';
     
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
-        const json = await res.json();
+        const data = await res.json();
         
-        // 此處 logic 兼容兩種後端回傳結構 (陣列本身 或 包裹在 .data 裡)
-        const rawList = Array.isArray(json) ? json : (json.data || []);
-        
-        allGames = rawList.map(item => {
-            // 嘗試抓取 item.data 或 item 本身
-            const d = item.data || item;
+        // 【已修正路徑】根據你的 Console 資料結構直接映射
+        // 資料在 item.data 內，total 等數值直接在該層級
+        allGames = (Array.isArray(data) ? data : (data.data || [])).map(item => {
+            const d = item.data || item; 
             return {
                 home: d.home || 'Unknown',
                 away: d.away || 'Unknown',
                 commence_time: d.commence_time || '',
-                latest: {
-                    total: d.total || 0,
-                    over_juice: d.over_price || 0,
-                    under_juice: d.under_price || 0,
-                    ml_home: d.ml_home || 0,
-                    ml_away: d.ml_away || 0
-                }
+                total: d.total || 0,
+                over_price: d.over_price || 0,
+                under_price: d.under_price || 0,
+                ml_home: d.ml_home || 0,
+                ml_away: d.ml_away || 0
             };
         });
         
-        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線 Pinnacle</span>';
+        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
         renderToday();
     } catch(e) {
         console.error("fetchData 錯誤:", e);
@@ -95,11 +90,11 @@ function renderToday() {
         <tr class="hover:bg-[#172a45]/30 text-sm border-b border-gray-800/50">
             <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
             <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal text-xs">${g.away}</span></td>
-            <td class="p-4 font-black text-white text-lg">${g.latest.total}</td>
-            <td class="p-4 text-xs"><span class="text-orange-400">O:${g.latest.over_juice}</span> / <span class="text-cyan-400">U:${g.latest.under_juice}</span></td>
-            <td class="p-4 text-xs">主:${g.latest.ml_home} / 客:${g.latest.ml_away}</td>
+            <td class="p-4 font-black text-white text-lg">${g.total}</td>
+            <td class="p-4 text-xs"><span class="text-orange-400">O:${g.over_price}</span> / <span class="text-cyan-400">U:${g.under_price}</span></td>
+            <td class="p-4 text-xs">主:${g.ml_home} / 客:${g.ml_away}</td>
         </tr>
-    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">目前無盤口資料，請點擊更新</td></tr>';
+    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">尚無盤口數據</td></tr>';
 }
 
 function switchTab(tab) {
