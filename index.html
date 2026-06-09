@@ -8,21 +8,21 @@ async function fetchData() {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const json = await res.json();
         
-        // --- 關鍵除錯：讓我們確認資料長什麼樣 ---
-        console.log("後端回傳的完整資料:", json); 
+        // --- 核心除錯：強制在控制台印出資料結構 ---
+        console.log("=== API 返回的完整資料結構 ===");
+        console.log(json); 
+        // ----------------------------------------
         
-        // 自動適應結構：不管回傳的是 {data: [...]} 還是 [...]
         const rawList = Array.isArray(json) ? json : (json.data || []);
         
         allGames = rawList.map(item => {
-            // 處理嵌套資料，自動檢查 item.data 或 item 本身
+            // 嘗試自動檢查 item.data 或 item 本身
             const d = item.data || item; 
-            
             return {
-                home: d.home_team || d.home || 'Unknown',
-                away: d.away_team || d.away || 'Unknown',
+                // 這裡我們把所有可能的欄位名稱都列出來嘗試
+                home: d.home_team || d.home || d.team_home || 'Unknown',
+                away: d.away_team || d.away || d.team_away || 'Unknown',
                 commence_time: d.commence_time || '',
-                // 加入更多可能的路徑，防止出現 0
                 total: d.total || d.total_points || 0,
                 over_price: d.over_price || d.over || 0,
                 under_price: d.under_price || d.under || 0,
