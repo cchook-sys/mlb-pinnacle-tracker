@@ -2,12 +2,8 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB ENTRY | PRO DASHBOARD</title>
+    <title>MLBENTRY v3.0.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-    </style>
 </head>
 <body class="bg-slate-950 text-slate-200 p-6">
     <div class="max-w-6xl mx-auto">
@@ -21,54 +17,71 @@
 
         <div class="bg-slate-900 rounded-lg overflow-hidden border border-slate-800">
             <div class="grid grid-cols-6 gap-4 p-4 border-b border-slate-700 text-slate-400 text-sm font-semibold">
-                <div>開賽時間 (UTC)</div>
+                <div>開賽時間</div>
                 <div>對陣球隊</div>
                 <div>大小分盤口</div>
                 <div>走勢紀錄</div>
                 <div>獨贏盤 (主/客)</div>
                 <div>進場狀態</div>
             </div>
-            
-            <div id="games-list">
-                <p class="p-8 text-center text-slate-500">正在載入數據...</p>
-            </div>
+            <div id="games-list"></div>
+        </div>
+    </div>
+
+    <div id="game-modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 p-6 rounded-lg w-full max-w-lg border border-slate-600">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4 text-blue-400"></h2>
+            <div id="modal-content" class="space-y-2"></div>
+            <button onclick="closeModal()" class="mt-6 w-full py-2 bg-blue-600 hover:bg-blue-500 rounded font-bold">關閉</button>
         </div>
     </div>
 
     <script>
+        let allGames = [];
         async function fetchGames() {
             const container = document.getElementById('games-list');
             try {
                 const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
                 const json = await res.json();
+                allGames = json.data;
+                document.getElementById('update-time').innerText = `更新時間: ${new Date().toLocaleTimeString()} | 總場次: ${allGames.length} GAMES`;
                 
-                document.getElementById('update-time').innerText = `更新時間 (本地): ${new Date().toLocaleTimeString()} | 今日總場次: ${json.data.length} GAMES`;
-
-                if (json.data && json.data.length > 0) {
-                    container.innerHTML = json.data.map(g => `
-                        <div class="grid grid-cols-6 gap-4 p-4 border-b border-slate-800 hover:bg-slate-800/50 items-center text-sm">
-                            <div class="text-xs text-slate-400">${g.commence_time.substring(5, 16).replace('T', ' ')}</div>
-                            <div class="font-bold">
-                                <div>${g.away_team}</div>
-                                <div class="text-slate-500">${g.home_team}</div>
-                            </div>
-                            <div class="text-red-400 font-bold">
-                                9.5
-                                <div class="text-[10px] text-slate-500 font-normal">O: -108 / U: -110</div>
-                            </div>
-                            <div class="text-slate-400 text-xs">已紀錄 1 筆</div>
-                            <div class="text-xs">
-                                <div>主: ${g.bookmakers[0]?.markets[0]?.outcomes[0]?.price || '-'}</div>
-                                <div>客: ${g.bookmakers[0]?.markets[0]?.outcomes[1]?.price || '-'}</div>
-                            </div>
-                            <button class="bg-slate-800 border border-slate-600 text-slate-400 px-3 py-1 rounded text-xs w-20">無</button>
+                container.innerHTML = allGames.map(g => `
+                    <div class="grid grid-cols-6 gap-4 p-4 border-b border-slate-800 hover:bg-slate-800/50 items-center text-sm cursor-pointer" onclick="showDetails('${g.id}')">
+                        <div class="text-xs text-slate-400">${g.commence_time.substring(5, 16).replace('T', ' ')}</div>
+                        <div class="font-bold">
+                            <div>${g.away_team}</div>
+                            <div class="text-slate-500">${g.home_team}</div>
                         </div>
-                    `).join('');
-                }
-            } catch (e) {
-                container.innerHTML = "<p class='p-8 text-center text-red-400'>數據載入失敗</p>";
-            }
+                        <div class="text-red-400 font-bold">9.5 <div class="text-[10px] text-slate-500 font-normal">O/U</div></div>
+                        <div class="text-slate-400 text-xs">已紀錄 1 筆</div>
+                        <div class="text-xs">
+                            <div>主: ${g.bookmakers[0]?.markets[0]?.outcomes[0]?.price || '-'}</div>
+                            <div>客: ${g.bookmakers[0]?.markets[0]?.outcomes[1]?.price || '-'}</div>
+                        </div>
+                        <button class="bg-slate-800 border border-slate-600 text-slate-400 px-3 py-1 rounded text-xs w-20">無</button>
+                    </div>
+                `).join('');
+            } catch (e) { container.innerHTML = "<p class='p-8 text-center text-red-400'>數據載入失敗</p>"; }
         }
+
+        window.showDetails = (id) => {
+            const g = allGames.find(x => x.id === id);
+            document.getElementById('modal-title').innerText = `${g.away_team} vs ${g.home_team}`;
+            document.getElementById('modal-content').innerHTML = g.bookmakers.map(b => `
+                <div class="bg-slate-700 p-3 rounded mb-2">
+                    <div class="font-bold text-blue-300">${b.title}</div>
+                    <div class="flex justify-between text-sm"><span>${g.away_team}: ${b.markets[0].outcomes[0].price}</span><span>${g.home_team}: ${b.markets[0].outcomes[1].price}</span></div>
+                </div>
+            `).join('');
+            document.getElementById('game-modal').classList.remove('hidden');
+            document.getElementById('game-modal').classList.add('flex');
+        };
+
+        window.closeModal = () => {
+            document.getElementById('game-modal').classList.remove('flex');
+            document.getElementById('game-modal').classList.add('hidden');
+        };
         fetchGames();
     </script>
 </body>
