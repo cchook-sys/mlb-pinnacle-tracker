@@ -1,7 +1,7 @@
 """
 MLB Pinnacle Tracker v4
 - MongoDB 持久化儲存（快照 + 歷史結算）
-- 每 15 分鐘自動抓 Pinnacle 盤口
+- 每 60 分鐘自動抓 Pinnacle 盤口 (已調整為 60 分鐘以節省點數)
 - 每天自動抓賽果 + 結算昨日預測
 - 昨日記錄保留一天後覆蓋
 """
@@ -119,7 +119,7 @@ async def fetch_and_store_odds():
                 last_snap = existing["snapshots"][-1] if existing["snapshots"] else {}
                 changed = (last_snap.get("total") != snap["total"] or last_snap.get("ml_home") != snap["ml_home"])
                 age_mins = (ts - last_snap["ts"].replace(tzinfo=timezone.utc)).total_seconds() / 60 if last_snap.get("ts") else 9999
-                if changed or age_mins >= 15:
+                if changed or age_mins >= 60: # 條件同步調整為 60 分鐘
                     snaps = existing["snapshots"][-49:] + [snap]
                     await coll.update_one({"_id": existing["_id"]}, {"$set": {"snapshots": snaps, "latest": snap, "signal": signal_from_snaps(snaps), "updated_at": ts}})
                     stored += 1
@@ -179,7 +179,8 @@ async def scheduler():
     while True:
         await fetch_and_store_odds()
         await fetch_and_settle()
-        await asyncio.sleep(15 * 60)
+        # 修改為每 60 分鐘執行一次 (60 * 60 秒)
+        await asyncio.sleep(60 * 60)
 
 # ── App Startup ───────────────────────────────────────────────────────────────
 @asynccontextmanager
