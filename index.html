@@ -10,33 +10,58 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .anim-spin { animation: spin 1s linear infinite; display:inline-block; }
         @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        .tab-btn { transition: all .2s; cursor: pointer; }
         .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
-        .conf-bar { height:3px; background:#1e3a5f; border-radius:2px; }
-        .conf-fill { height:100%; border-radius:2px; }
     </style>
 </head>
 <body class="p-4 md:p-6">
-    <div id="app" class="max-w-7xl mx-auto space-y-5">
-        <div id="status-text">連線中...</div>
-        <button id="refresh-btn" onclick="fetchData()">更新盤口</button>
-        <tbody id="today-tbody"></tbody>
+    <div class="max-w-7xl mx-auto space-y-5">
+        <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-center gap-5">
+            <div>
+                <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
+                <div id="status-text" class="text-xs text-gray-500 mt-2">連線中...</div>
+            </div>
+            <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm">更新盤口</button>
+        </div>
+
+        <div class="flex gap-2">
+            <button id="tab-today" onclick="switchTab('today')" class="tab-btn active px-5 py-2.5 rounded-lg text-sm font-bold border border-gray-700 text-gray-300">📡 今日盤口</button>
+            <button id="tab-history" onclick="switchTab('history')" class="tab-btn px-5 py-2.5 rounded-lg text-sm font-bold border border-gray-700 text-gray-500">📊 昨日結算</button>
+        </div>
+
+        <div id="view-today" class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
+            <table class="w-full text-left min-w-[980px]">
+                <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
+                    <tr><th class="p-4">時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">O/U 賠率</th><th class="p-4">獨贏</th></tr>
+                </thead>
+                <tbody id="today-tbody" class="divide-y divide-gray-800/50"></tbody>
+            </table>
+        </div>
+
+        <div id="view-history" class="hidden bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
+            <table class="w-full text-left min-w-[900px]">
+                <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
+                    <tr><th class="p-4">比賽</th><th class="p-4">開盤</th><th class="p-4">收盤</th><th class="p-4">結果</th></tr>
+                </thead>
+                <tbody id="history-tbody" class="divide-y divide-gray-800/50"></tbody>
+            </table>
+        </div>
     </div>
 
 <script>
 const API = 'https://mlb-pinnacle-tracker.onrender.com';
 let allGames = [];
 
+// 橋接與獲取資料
 async function fetchData() {
     const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    btn.disabled = true; 
-    st.innerHTML = '正在刷新數據...';
-
+    btn.disabled = true; st.innerHTML = '更新中...';
+    
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const json = await res.json();
         
-        // 【關鍵橋接層】將 MongoDB 資料轉換為 renderToday 等函式預期的結構
         allGames = (json.data || []).map(item => {
             const d = item.data || {};
             return {
@@ -44,34 +69,46 @@ async function fetchData() {
                 home: d.home || 'Unknown',
                 away: d.away || 'Unknown',
                 commence_time: d.commence_time || '',
-                snapshot_count: 1,
-                latest: {
-                    total: d.total || 0,
-                    over_juice: d.over_price || 0,
-                    under_juice: d.under_price || 0,
-                    ml_home: d.ml_home || 0,
-                    ml_away: d.ml_away || 0
-                },
-                open: { total: d.total || 0 },
-                history: [{total: d.total || 0}]
+                latest: { total: d.total || 0, over_juice: d.over_price || 0, under_juice: d.under_price || 0, ml_home: d.ml_home || 0, ml_away: d.ml_away || 0 }
             };
         });
-
+        
         st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
-        
-        // 觸發你原本寫好的渲染與分析邏輯
-        if (typeof renderToday === 'function') renderToday();
-        if (typeof fetchStats === 'function') fetchStats();
-        
-    } catch(e) {
-        console.error("fetchData 錯誤:", e);
-        st.innerHTML = '<span class="text-red-400">連線失敗</span>';
-    } finally {
-        btn.disabled = false;
-    }
+        renderToday();
+    } catch(e) { st.innerHTML = '<span class="text-red-400">連線失敗</span>'; } 
+    finally { btn.disabled = false; btn.innerHTML = '更新盤口'; }
 }
 
-// 確保執行入口
+async function fetchHistory() {
+    const tbody = document.getElementById('history-tbody');
+    try {
+        const res = await fetch(API + '/history');
+        const json = await res.json();
+        const data = json.data || [];
+        tbody.innerHTML = data.length ? data.map(g => `<tr><td class="p-4">${g.away} @ ${g.home}</td><td class="p-4">${g.open_total}</td><td class="p-4">${g.close_total}</td><td class="p-4">${g.result || '待定'}</td></tr>`).join('') : '<tr><td colspan="4" class="p-4 text-center">尚無資料</td></tr>';
+    } catch(e) { tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-red-500">載入失敗</td></tr>'; }
+}
+
+function renderToday() {
+    document.getElementById('today-tbody').innerHTML = allGames.map(g => `
+        <tr class="hover:bg-[#172a45]/30 text-sm">
+            <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
+            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal">${g.away}</span></td>
+            <td class="p-4 font-black text-white">${g.latest.total || '-'}</td>
+            <td class="p-4 text-xs">O:${g.latest.over_juice} / U:${g.latest.under_juice}</td>
+            <td class="p-4 text-xs">主:${g.latest.ml_home} / 客:${g.latest.ml_away}</td>
+        </tr>
+    `).join('');
+}
+
+function switchTab(tab) {
+    document.getElementById('view-today').classList.toggle('hidden', tab !== 'today');
+    document.getElementById('view-history').classList.toggle('hidden', tab !== 'history');
+    document.getElementById('tab-today').classList.toggle('active', tab === 'today');
+    document.getElementById('tab-history').classList.toggle('active', tab === 'history');
+    if (tab === 'history') fetchHistory();
+}
+
 window.onload = fetchData;
 </script>
 </body>
