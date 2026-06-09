@@ -1,8 +1,9 @@
 """
-MLB Pinnacle Tracker v4
+MLB Pinnacle Tracker v4 - 完整修正版
 - MongoDB 持久化儲存（快照 + 歷史結算）
-- 每 60 分鐘自動抓 Pinnacle 盤口
-- 每天自動抓賽果 + 結算昨日預測
+- 每 60 分鐘自動抓 Pinnacle 盤口 (已針對免費額度優化)
+- 處理 ObjectId 序列化錯誤
+- 修正路由定義順序與 CORS 設定
 """
 
 import os, time, asyncio, logging
@@ -13,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+from bson import ObjectId
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -51,7 +53,7 @@ def pick_from_signal(sig: dict, game: dict) -> str | None:
     if d <= -0.25: return f"UNDER {total}"
     return None
 
-# ── Fetch Data ────────────────────────────────────────────────────────────────
+# ── Fetch Data (使用 Params 避免 401) ─────────────────────────────────────────
 async def fetch_api(endpoint: str):
     async with httpx.AsyncClient(timeout=30) as client:
         params = {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,totals,spreads", "bookmakers": BOOKMAKER, "oddsFormat": "american"}
@@ -111,19 +113,32 @@ async def lifespan(app: FastAPI):
     yield
     client.close()
 
-# 實例化 app (放在所有路由之前)
+# 實例化 app
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# 強制設定 CORS 以解決跨網域問題
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 # ── Routes (放在檔案最底部) ───────────────────────────────────────────────────
 @app.get("/")
 async def root(): return {"status": "ok"}
 
 @app.get("/games")
-async def get_games(): return await get_db()["snapshots"].find({"date": et_date_str()}).to_list(50)
+async def get_games():
+    today = et_date_str()
+    docs = await get_db()["snapshots"].find({"date": today}).to_list(50)
+    for d in docs: d["_id"] = str(d["_id"])
+    return docs
 
 @app.get("/history")
-async def get_history(): return await get_db()["history"].find().to_list(30)
+async def get_history():
+    docs = await get_db()["history"].find().to_list(30)
+    for d in docs: d["_id"] = str(d["_id"])
+    return docs
 
 @app.get("/stats")
 async def get_stats():
