@@ -1,88 +1,519 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLBENTRY v4 - Pinnacle 盤口監控</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, sans-serif; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .anim-spin { animation: spin 1s linear infinite; display:inline-block; }
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MLBENTRY v4 - Pinnacle 盤口監控</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  @keyframes spin    { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  @keyframes pulse-g { 0%,100%{opacity:1} 50%{opacity:.35} }
+  @keyframes steam   { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .anim-spin  { animation: spin 1s linear infinite; display:inline-block; }
+  .anim-pulse { animation: pulse-g 1.4s ease-in-out infinite; }
+  .anim-steam { animation: steam 1.5s ease-in-out infinite; }
+  .conf-bar   { height:3px; background:#1e3a5f; border-radius:2px; overflow:hidden; }
+  .conf-fill  { height:100%; border-radius:2px; transition:width .6s ease; }
+  .tab-btn { transition: all .2s; }
+  .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
+</style>
 </head>
 <body class="p-4 md:p-6">
 <div class="max-w-7xl mx-auto space-y-5">
-    <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex justify-between items-center">
-        <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
-        <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm">更新盤口</button>
+
+<!-- ── HEADER ── -->
+<div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5">
+  <div>
+    <div class="flex items-center gap-3">
+      <h1 class="text-3xl font-black tracking-wider text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
+      <span class="text-xs bg-gray-800 text-gray-400 px-2.5 py-1 rounded font-mono border border-gray-700">v4.0</span>
     </div>
-    
-    <div class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
-        <table class="w-full text-left min-w-[980px]">
-            <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
-                <tr><th class="p-4">時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">O/U 賠率</th><th class="p-4">獨贏</th></tr>
-            </thead>
-            <tbody id="today-tbody" class="divide-y divide-gray-800/50"></tbody>
-        </table>
+    <div class="text-sm mt-2 flex flex-wrap gap-x-4 gap-y-1 items-center">
+      <span class="text-gray-400">ET <span id="et-clock" class="text-blue-400 font-mono font-bold">--:--:--</span></span>
+      <span class="text-gray-600">|</span>
+      <span class="text-gray-400">場次 <span id="games-count" class="text-white font-mono font-bold">0</span></span>
+      <span class="text-gray-600">|</span>
+      <span class="text-gray-400">快照 <span id="snaps-count" class="text-blue-400 font-mono font-bold">0</span></span>
+      <span class="text-gray-600">|</span>
+      <span id="status-text" class="text-xs text-gray-500">連線中...</span>
     </div>
+  </div>
+  <div class="flex flex-col sm:flex-row items-stretch gap-3 w-full lg:w-auto">
+    <!-- Stats -->
+    <div class="grid grid-cols-4 gap-4 bg-[#09101a] px-5 py-3 rounded-lg border border-gray-800 text-center">
+      <div>
+        <div class="text-xs text-gray-400 mb-1">蒸汽</div>
+        <div id="stat-steam" class="text-2xl font-black text-orange-400 font-mono">0</div>
+      </div>
+      <div class="border-x border-gray-800">
+        <div class="text-xs text-gray-400 mb-1">可進場</div>
+        <div id="stat-ready" class="text-2xl font-black text-[#39ff14] font-mono anim-pulse">0</div>
+      </div>
+      <div class="border-r border-gray-800">
+        <div class="text-xs text-gray-400 mb-1">信號</div>
+        <div id="stat-signals" class="text-2xl font-black text-blue-400 font-mono">0</div>
+      </div>
+      <div>
+        <div class="text-xs text-gray-400 mb-1">勝率</div>
+        <div id="stat-winrate" class="text-2xl font-black text-purple-400 font-mono">—</div>
+      </div>
+    </div>
+    <!-- Buttons -->
+    <div class="flex gap-2">
+      <button id="refresh-btn" onclick="fetchData()"
+        class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-lg font-bold text-sm transition-all flex items-center gap-2 flex-1 justify-center">
+        <span id="refresh-icon">↺</span>
+        <span id="btn-text">更新盤口</span>
+      </button>
+      <button onclick="runParlay()"
+        class="bg-[#0f2d0f] hover:bg-[#153d15] text-[#39ff14] border border-[#39ff14]/40 px-5 py-3 rounded-lg font-bold text-sm transition-all flex items-center gap-2 flex-1 justify-center">
+        🎯 過關分析
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── TABS ── -->
+<div class="flex gap-2">
+  <button id="tab-today" onclick="switchTab('today')"
+    class="tab-btn active px-5 py-2.5 rounded-lg text-sm font-bold border border-gray-700 text-gray-300">
+    📡 今日盤口
+  </button>
+  <button id="tab-history" onclick="switchTab('history')"
+    class="tab-btn px-5 py-2.5 rounded-lg text-sm font-bold border border-gray-700 text-gray-500">
+    📊 昨日結算
+  </button>
+</div>
+
+<!-- ── PARLAY PANEL ── -->
+<div id="parlay-panel" class="hidden">
+  <div class="bg-[#0f1b2d] rounded-xl border border-[#39ff14]/30 overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-800 flex justify-between items-center">
+      <div>
+        <div class="text-lg font-black tracking-widest text-[#39ff14]">⚡ 過關建議</div>
+        <div class="text-xs text-gray-500 mt-1">基於 Pinnacle 盤口移動 · MongoDB 持久快照</div>
+      </div>
+      <button onclick="document.getElementById('parlay-panel').classList.add('hidden')"
+        class="text-gray-600 hover:text-gray-400 text-xl font-bold">✕</button>
+    </div>
+    <div id="parlay-grid" class="p-5 grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+    <div class="px-5 py-3 bg-[#09101a] border-t border-gray-800 text-xs text-gray-500">
+      ⚠ 僅供參考。建議累積 3 筆以上快照再分析。每 15 分鐘自動更新快照。
+    </div>
+  </div>
+</div>
+
+<!-- ── TODAY TABLE ── -->
+<div id="view-today">
+  <div class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
+    <div class="overflow-x-auto no-scrollbar">
+      <table class="w-full text-left border-collapse min-w-[980px]">
+        <thead>
+          <tr class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-800">
+            <th class="p-4">開賽時間 ET</th>
+            <th class="p-4">對陣球隊</th>
+            <th class="p-4">大小分</th>
+            <th class="p-4">移動幅度</th>
+            <th class="p-4">Over / Under</th>
+            <th class="p-4">獨贏 ML</th>
+            <th class="p-4">破口信號</th>
+            <th class="p-4 text-center">進場狀態</th>
+          </tr>
+        </thead>
+        <tbody id="today-tbody" class="divide-y divide-gray-800/50">
+          <tr><td colspan="8" class="text-center p-12 text-gray-500">正在連線 Pinnacle...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── HISTORY TABLE ── -->
+<div id="view-history" class="hidden">
+  <div class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-800 flex justify-between items-center">
+      <div>
+        <div class="text-base font-bold text-white">昨日結算記錄</div>
+        <div class="text-xs text-gray-500 mt-1">自動抓取賽果 · 每日覆蓋更新 · 用於修正盤口推演模型</div>
+      </div>
+      <div id="hist-stats" class="text-right text-xs text-gray-500"></div>
+    </div>
+    <div class="overflow-x-auto no-scrollbar">
+      <table class="w-full text-left border-collapse min-w-[900px]">
+        <thead>
+          <tr class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-800">
+            <th class="p-4">比賽</th>
+            <th class="p-4">開盤</th>
+            <th class="p-4">收盤</th>
+            <th class="p-4">移動</th>
+            <th class="p-4">我們的推算</th>
+            <th class="p-4">實際總分</th>
+            <th class="p-4 text-center">結果</th>
+            <th class="p-4">修正方向</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody">
+          <tr><td colspan="8" class="text-center p-10 text-gray-500">載入昨日結算...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="text-center text-xs text-gray-700 pb-2">
+  數據源：Pinnacle · 每 15 分鐘自動快照 · MongoDB Atlas 持久儲存
+</div>
 </div>
 
 <script>
 const API = 'https://mlb-pinnacle-tracker.onrender.com';
 let allGames = [];
+let currentTab = 'today';
 
+// ── ET CLOCK ──────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('et-clock').textContent =
+    new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'America/New_York'});
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const fmtOdds = n => n==null||n==='-' ? '—' : n>0 ? '+'+n : ''+n;
+const minsUntil = iso => Math.round((new Date(iso)-Date.now())/60000);
+function fmtET(iso) {
+  return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
+}
+function fmtMins(m) {
+  if (m<=0)  return '<span class="text-red-400 font-bold">🔴 LIVE</span>';
+  if (m>=60) return '<span class="text-gray-400">'+Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+'m</span>';
+  return '<span class="text-yellow-400 font-bold">'+m+'m</span>';
+}
+
+// ── SIGNAL ────────────────────────────────────────────────────────────────────
+function calcSig(snaps) {
+  if (!snaps||snaps.length<2) return {label:'—',cls:'text-gray-600',delta:0,steam:false,color:'#4b5563',pick:null};
+  const d = +(snaps[snaps.length-1].total - snaps[0].total).toFixed(1);
+  if (d>=0.5)  return {label:'⚡ 大分蒸汽',cls:'text-orange-400 font-bold anim-steam',delta:d,steam:true,color:'#f97316',pick:'OVER'};
+  if (d<=-0.5) return {label:'⚡ 小分蒸汽',cls:'text-cyan-400 font-bold anim-steam',  delta:d,steam:true,color:'#38bdf8',pick:'UNDER'};
+  if (d>=0.25) return {label:'↑ 大分傾向', cls:'text-orange-300',delta:d,steam:false,color:'#fb923c',pick:'OVER'};
+  if (d<=-0.25)return {label:'↓ 小分傾向', cls:'text-cyan-300',  delta:d,steam:false,color:'#7dd3fc',pick:'UNDER'};
+  return {label:'觀望',cls:'text-gray-500',delta:d,steam:false,color:'#6b7280',pick:null};
+}
+
+function calcEntry(snaps, mins) {
+  if (mins<=0)   return {label:'進行中', cls:'bg-red-950/40 text-red-400 border-red-500/50'};
+  if (mins<20)   return {label:'已過期', cls:'bg-gray-800 text-gray-500 border-gray-700'};
+  const sig = calcSig(snaps);
+  if (!sig.pick) return {label:'觀望',   cls:'bg-gray-800 text-gray-500 border-gray-700'};
+  if (snaps.length>=2) {
+    const recent = Math.abs(snaps[snaps.length-1].total - snaps[snaps.length-2].total);
+    if (recent>=0.1) return {label:'等待停滯', cls:'bg-yellow-950/40 text-yellow-400 border-yellow-500/50'};
+  }
+  return {label:'✓ 可進場', cls:'bg-green-950/40 text-green-400 border-green-500/50'};
+}
+
+// ── TAB SWITCH ────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('view-today').classList.toggle('hidden', tab!=='today');
+  document.getElementById('view-history').classList.toggle('hidden', tab!=='history');
+  document.getElementById('tab-today').classList.toggle('active', tab==='today');
+  document.getElementById('tab-history').classList.toggle('active', tab==='history');
+  if (tab==='history') fetchHistory();
+}
+
+// ── FETCH TODAY ───────────────────────────────────────────────────────────────
 async function fetchData() {
-    const btn = document.getElementById('refresh-btn');
-    btn.disabled = true; btn.innerHTML = '<span class="anim-spin">↺</span> 更新中...';
-    
-    try {
-        const res = await fetch(API + '/games');
-        const json = await res.json();
-        
-        // 【核心修正】這裡將後端簡化的資料對應到前端邏輯
-        allGames = (json.data || []).map(item => {
-            const d = item.data; // 後端傳回的結構
-            return {
-                id: item.game_id,
-                home: d.home,
-                away: d.away,
-                commence_time: d.commence_time,
-                latest: {
-                    total: d.total,
-                    over_juice: d.over_price,
-                    under_juice: d.under_price,
-                    ml_home: d.ml_home,
-                    ml_away: d.ml_away
-                },
-                history: [{total: d.total}] // 初始化歷史數據以防報錯
-            };
-        });
-        
-        renderToday();
-    } catch(e) {
-        console.error(e);
-    } finally {
-        btn.disabled = false; btn.innerHTML = '更新盤口';
-    }
+  const btn  = document.getElementById('refresh-btn');
+  const icon = document.getElementById('refresh-icon');
+  const txt  = document.getElementById('btn-text');
+  const st   = document.getElementById('status-text');
+
+  btn.disabled=true; icon.classList.add('anim-spin'); txt.textContent='更新中...';
+
+  try {
+    const res = await fetch(API+'/games');
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    allGames = await res.json();
+
+    st.innerHTML = '<span class="text-green-400 font-bold">● 已連線 Pinnacle</span>';
+    document.getElementById('games-count').textContent = allGames.length;
+    document.getElementById('snaps-count').textContent =
+      allGames.reduce((s,g)=>s+(g.snapshot_count||0),0);
+
+    renderToday();
+    fetchStats();
+  } catch(e) {
+    st.innerHTML = '<span class="text-red-400">✕ '+e.message+'</span>';
+    document.getElementById('today-tbody').innerHTML =
+      `<tr><td colspan="8" class="text-center p-10 text-red-400">
+        連線失敗：${e.message}<br>
+        <span class="text-xs text-gray-500 mt-2 block">
+          先喚醒後端：<a href="${API}" target="_blank" class="text-blue-400 underline">${API}</a>
+        </span></td></tr>`;
+  } finally {
+    btn.disabled=false; icon.classList.remove('anim-spin'); txt.textContent='更新盤口';
+  }
 }
 
+// ── RENDER TODAY ──────────────────────────────────────────────────────────────
 function renderToday() {
-    const tbody = document.getElementById('today-tbody');
-    tbody.innerHTML = allGames.map(g => `
-        <tr class="hover:bg-[#172a45]/30 text-sm">
-            <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
-            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal">${g.away}</span></td>
-            <td class="p-4 font-black text-white">${g.latest.total || '-'}</td>
-            <td class="p-4 text-xs">O:${g.latest.over_juice} / U:${g.latest.under_juice}</td>
-            <td class="p-4 text-xs">主:${g.latest.ml_home} / 客:${g.latest.ml_away}</td>
-        </tr>
-    `).join('');
+  const tbody = document.getElementById('today-tbody');
+  let steamCnt=0, readyCnt=0, sigCnt=0;
+
+  tbody.innerHTML = allGames.map(g => {
+    const snaps = (g.history||[]).filter(s=>s.total!=null);
+    const mins  = minsUntil(g.commence_time);
+    const sig   = calcSig(snaps);
+    const entry = calcEntry(snaps, mins);
+    const open  = g.open?.total;
+    const cur   = g.latest?.total;
+
+    const deltaStr = sig.delta===0||!open ? '─'
+      : sig.delta>0 ? `<span class="text-orange-400 font-bold">▲ +${sig.delta}</span>`
+      :               `<span class="text-cyan-400 font-bold">▼ ${sig.delta}</span>`;
+
+    if (sig.steam)  steamCnt++;
+    if (sig.pick)   sigCnt++;
+    if (entry.label==='✓ 可進場') readyCnt++;
+
+    const borderL  = sig.steam ? (sig.delta>0?'border-l-2 border-orange-500':'border-l-2 border-cyan-400') : '';
+    const rowBg    = sig.steam ? 'bg-orange-950/10 hover:bg-orange-950/20' : 'hover:bg-[#172a45]/30';
+    const snapBadge= `<span class="text-xs text-gray-600">${g.snapshot_count||0} 快照</span>`;
+
+    return `<tr class="${rowBg} ${borderL} transition-colors text-sm">
+      <td class="p-4 whitespace-nowrap">
+        <div class="font-mono text-gray-300">${fmtET(g.commence_time)}</div>
+        <div class="text-xs mt-1">${fmtMins(mins)}</div>
+      </td>
+      <td class="p-4">
+        <div class="font-bold text-white">${g.home||'—'}</div>
+        <div class="text-gray-400 text-xs mt-0.5">${g.away||'—'}</div>
+        <div class="mt-1">${snapBadge}</div>
+      </td>
+      <td class="p-4">
+        <div class="text-xl font-extrabold text-white font-mono">${cur??'—'}</div>
+        ${open!=null ? `<div class="text-xs text-gray-500 mt-0.5">開盤 ${open}</div>` : ''}
+      </td>
+      <td class="p-4 font-mono text-sm">
+        ${deltaStr}
+        ${snaps.length>=2 ? `<div class="conf-bar w-16 mt-1.5">
+          <div class="conf-fill" style="width:${Math.min(100,Math.abs(sig.delta)*100)}%;background:${sig.color}"></div>
+        </div>` : ''}
+      </td>
+      <td class="p-4 font-mono text-xs">
+        <span class="text-orange-400">O ${fmtOdds(g.latest?.over_juice)}</span>
+        <span class="text-gray-600 mx-1">/</span>
+        <span class="text-cyan-400">U ${fmtOdds(g.latest?.under_juice)}</span>
+      </td>
+      <td class="p-4 font-mono text-xs text-gray-300">
+        <div>主 ${fmtOdds(g.latest?.ml_home)}</div>
+        <div class="mt-0.5">客 ${fmtOdds(g.latest?.ml_away)}</div>
+      </td>
+      <td class="p-4 ${sig.cls}">${sig.label}</td>
+      <td class="p-4 text-center">
+        <span class="px-2.5 py-1.5 rounded text-xs font-bold border block w-[92px] mx-auto text-center ${entry.cls}">
+          ${entry.label}
+        </span>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="text-center p-8 text-gray-500">目前無盤口數據</td></tr>';
+
+  document.getElementById('stat-steam').textContent   = steamCnt;
+  document.getElementById('stat-ready').textContent   = readyCnt;
+  document.getElementById('stat-signals').textContent = sigCnt;
 }
 
-fetchData();
+// ── FETCH HISTORY ─────────────────────────────────────────────────────────────
+async function fetchHistory() {
+  const tbody = document.getElementById('history-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" class="text-center p-8 text-gray-500">載入昨日結算...</td></tr>';
+  try {
+    const res = await fetch(API+'/history');
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    renderHistory(data);
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center p-8 text-red-400">載入失敗：${e.message}</td></tr>`;
+  }
+}
+
+function renderHistory(data) {
+  const tbody = document.getElementById('history-tbody');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center p-10 text-gray-500">昨日尚無結算記錄<br><span class="text-xs text-gray-600">賽事結束後自動結算</span></td></tr>';
+    return;
+  }
+
+  let wins=0, losses=0, pushes=0;
+
+  tbody.innerHTML = data.map(g => {
+    const res    = g.result;
+    const delta  = g.total_delta || 0;
+    const deltaStr = delta===0 ? '─'
+      : delta>0 ? `<span class="text-orange-400">▲+${delta}</span>`
+      :           `<span class="text-cyan-400">▼${delta}</span>`;
+
+    let resCls = 'bg-gray-800 text-gray-500 border-gray-700';
+    let resLabel = '未結算';
+    if (res==='WIN')  { resCls='bg-green-950/40 text-green-400 border-green-500/50'; resLabel='✓ 過盤'; wins++; }
+    if (res==='LOSS') { resCls='bg-red-950/40 text-red-400 border-red-500/50'; resLabel='✗ 未過'; losses++; }
+    if (res==='PUSH') { resCls='bg-yellow-950/40 text-yellow-400 border-yellow-500/50'; resLabel='~ Push'; pushes++; }
+
+    // 修正方向邏輯
+    let correction = '─';
+    if (res==='LOSS' && g.pick) {
+      if (g.pick.includes('OVER'))  correction = '<span class="text-cyan-400">↓ 盤口偏高，下次考慮小分</span>';
+      if (g.pick.includes('UNDER')) correction = '<span class="text-orange-400">↑ 盤口偏低，下次考慮大分</span>';
+    } else if (res==='WIN') {
+      correction = '<span class="text-green-400">✓ 方向正確，維持策略</span>';
+    }
+
+    return `<tr class="hover:bg-[#172a45]/20 transition-colors text-sm border-b border-gray-800/50">
+      <td class="p-4">
+        <div class="font-bold text-white text-xs">${g.away} @ ${g.home}</div>
+        <div class="text-gray-500 text-xs mt-0.5">${fmtET(g.commence_time)}</div>
+      </td>
+      <td class="p-4 font-mono text-gray-300">${g.open_total??'—'}</td>
+      <td class="p-4 font-mono text-white font-bold">${g.close_total??'—'}</td>
+      <td class="p-4 font-mono text-sm">${deltaStr}</td>
+      <td class="p-4 text-xs">
+        ${g.pick
+          ? `<span class="font-bold" style="color:${g.pick.includes('OVER')?'#f97316':'#38bdf8'}">${g.pick}</span>`
+          : '<span class="text-gray-600">觀望</span>'}
+      </td>
+      <td class="p-4 font-mono font-bold text-white text-lg">${g.actual_total??'—'}</td>
+      <td class="p-4 text-center">
+        <span class="px-2.5 py-1.5 rounded text-xs font-bold border block w-[72px] mx-auto text-center ${resCls}">
+          ${resLabel}
+        </span>
+      </td>
+      <td class="p-4 text-xs">${correction}</td>
+    </tr>`;
+  }).join('');
+
+  const total = wins+losses;
+  const wr = total>0 ? Math.round(wins/total*100) : 0;
+  document.getElementById('hist-stats').innerHTML =
+    `<div class="text-sm font-bold text-white">${wins}勝 ${losses}敗 ${pushes}平</div>
+     <div class="text-${wr>=55?'green':wr>=45?'yellow':'red'}-400 font-bold">勝率 ${wr}%</div>`;
+}
+
+// ── FETCH STATS ───────────────────────────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const res = await fetch(API+'/stats');
+    if (!res.ok) return;
+    const s = await res.json();
+    document.getElementById('stat-winrate').textContent =
+      s.total>0 ? s.win_rate+'%' : '—';
+  } catch(_) {}
+}
+
+// ── PARLAY ────────────────────────────────────────────────────────────────────
+function scoreGame(g) {
+  const snaps = (g.history||[]).filter(s=>s.total!=null);
+  const mins  = minsUntil(g.commence_time);
+  const sig   = calcSig(snaps);
+  const entry = calcEntry(snaps, mins);
+  let score = 0;
+  if (Math.abs(sig.delta)>=0.5)   score += 40;
+  else if (Math.abs(sig.delta)>=0.25) score += 20;
+  if (entry.label==='✓ 可進場') score += 25;
+  else if (entry.label==='等待停滯') score += 10;
+  if ((g.snapshot_count||0)>=5) score += 15;
+  else if ((g.snapshot_count||0)>=3) score += 10;
+  else if ((g.snapshot_count||0)>=2) score += 5;
+  if (mins>=120&&mins<=480) score += 10;
+  const oj=g.latest?.over_juice, uj=g.latest?.under_juice;
+  if (oj&&uj&&Math.abs(oj)<=115&&Math.abs(uj)<=115) score += 10;
+  let pick=null, pickLabel='—', pickColor='#6b7280';
+  if (sig.delta>=0.5)        { pick='OVER';  pickLabel='大分 OVER '+g.latest?.total;  pickColor='#f97316'; }
+  else if (sig.delta<=-0.5)  { pick='UNDER'; pickLabel='小分 UNDER '+g.latest?.total; pickColor='#38bdf8'; }
+  else if (sig.delta>=0.25)  { pick='OVER';  pickLabel='大分傾向 '+g.latest?.total;   pickColor='#fb923c'; }
+  else if (sig.delta<=-0.25) { pick='UNDER'; pickLabel='小分傾向 '+g.latest?.total;   pickColor='#7dd3fc'; }
+  return {game:g,score,pick,pickLabel,pickColor,sig,snaps};
+}
+
+function toDecimal(odds) {
+  if (!odds) return 1.91;
+  if (odds>0) return +(1+odds/100).toFixed(3);
+  return +(1+100/Math.abs(odds)).toFixed(3);
+}
+
+function runParlay() {
+  const panel = document.getElementById('parlay-panel');
+  const grid  = document.getElementById('parlay-grid');
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  const valid = allGames.map(scoreGame).filter(s=>s.score>=50&&s.pick).sort((a,b)=>b.score-a.score);
+  if (!valid.length) {
+    grid.innerHTML = `<div class="col-span-3 text-center py-8 text-gray-500 text-sm">
+      快照不足，無法產生建議<br>
+      <span class="text-xs text-gray-600">每 15 分鐘自動更新快照，稍後再試</span></div>`;
+    return;
+  }
+  const parlays = [
+    {type:'🎯 單場最強', legs:valid.slice(0,1), note:'信號最強單場，移動停滯後進場'},
+    valid.length>=2 && {type:'🔗 2串1', legs:valid.slice(0,2), note:'兩場組合，中風險中賠率'},
+    valid.length>=3 && {type:'🚀 3串1', legs:valid.slice(0,3), note:'高賠率高風險，建議小注'},
+  ].filter(Boolean);
+
+  grid.innerHTML = parlays.map(p=>{
+    const dec = p.legs.map(l=>toDecimal(l.pick==='OVER'?l.game.latest?.over_juice:l.game.latest?.under_juice));
+    const combined = dec.reduce((a,b)=>a*b,1);
+    const combAmer = combined>=2 ? '+'+Math.round((combined-1)*100) : '-'+Math.round(100/(combined-1));
+    const avgConf  = Math.round(p.legs.reduce((s,l)=>s+l.score,0)/p.legs.length);
+    const cc = avgConf>=75?'#39ff14':avgConf>=55?'#facc15':'#f87171';
+    const riskLabel = p.legs.length===1?(avgConf>=70?'低風險':'中風險'):p.legs.length===2?'中風險':'高風險';
+    const rCls = riskLabel==='低風險'?'bg-green-950/40 text-green-400 border-green-500/50'
+      :riskLabel==='中風險'?'bg-yellow-950/40 text-yellow-400 border-yellow-500/50'
+      :'bg-red-950/40 text-red-400 border-red-500/50';
+
+    const legsHTML = p.legs.map(l=>{
+      const home=(l.game.home||'').split(' ').pop();
+      const away=(l.game.away||'').split(' ').pop();
+      const mins=minsUntil(l.game.commence_time);
+      return `<div class="bg-[#09101a] rounded-lg p-3 border border-gray-800">
+        <div class="flex justify-between items-start">
+          <div>
+            <div class="text-sm font-bold text-white">${away} @ ${home}</div>
+            <div class="text-xs text-gray-500 mt-0.5">${fmtET(l.game.commence_time)} · ${l.game.snapshot_count||0} 快照</div>
+            <div class="conf-bar w-24 mt-1.5"><div class="conf-fill" style="width:${l.score}%;background:${cc}"></div></div>
+          </div>
+          <div class="text-right ml-3 flex-shrink-0">
+            <div class="text-sm font-black" style="color:${l.pickColor}">${l.pickLabel}</div>
+            <div class="text-xs text-gray-500 mt-0.5">信心 ${l.score}/100</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    return `<div class="bg-[#09101a] rounded-xl border border-gray-800 overflow-hidden relative">
+      <div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#39ff14] to-blue-500"></div>
+      <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+        <div class="text-base font-black text-white">${p.type}</div>
+        <span class="text-xs px-2 py-1 rounded border font-bold ${rCls}">${riskLabel}</span>
+      </div>
+      <div class="p-4 space-y-2">${legsHTML}</div>
+      <div class="px-4 pb-4 flex justify-between items-end">
+        <div><div class="text-xs text-gray-500 mb-1">組合賠率</div>
+          <div class="text-3xl font-black font-mono" style="color:${cc}">${combAmer}</div></div>
+        <div class="text-center">
+          <div class="text-4xl font-black font-mono" style="color:${cc}">${avgConf}</div>
+          <div class="text-xs text-gray-500">平均信心</div></div>
+      </div>
+      <div class="px-4 pb-3 text-xs text-gray-600">${p.note}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+window.onload = fetchData;
 </script>
 </body>
 </html>
