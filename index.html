@@ -16,7 +16,7 @@
         <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-center gap-5">
             <div>
                 <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
-                <div id="status-text" class="text-xs text-gray-500 mt-2">連線中...</div>
+                <div id="status-text" class="text-xs text-gray-500 mt-2">準備連線...</div>
             </div>
             <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm hover:bg-blue-500 transition-all">更新盤口</button>
         </div>
@@ -50,33 +50,42 @@ const API = 'https://mlb-pinnacle-tracker.onrender.com';
 let allGames = [];
 
 async function fetchData() {
+    const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    st.innerHTML = '更新中...';
+    btn.disabled = true; 
+    st.innerHTML = '正在刷新...';
     
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
-        const data = await res.json();
+        const json = await res.json();
         
-        // 【已修正路徑】直接對接回傳的陣列結構
-        allGames = (Array.isArray(data) ? data : (data.data || [])).map(item => {
-            // 根據截圖，home/away/commence_time 在 item 根層級
+        // 此處 logic 兼容兩種後端回傳結構 (陣列本身 或 包裹在 .data 裡)
+        const rawList = Array.isArray(json) ? json : (json.data || []);
+        
+        allGames = rawList.map(item => {
+            // 嘗試抓取 item.data 或 item 本身
+            const d = item.data || item;
             return {
-                home: item.home || 'Unknown',
-                away: item.away || 'Unknown',
-                commence_time: item.commence_time || '',
-                total: item.total || 0,
-                over_price: item.over_price || 0,
-                under_price: item.under_price || 0,
-                ml_home: item.ml_home || 0,
-                ml_away: item.ml_away || 0
+                home: d.home || 'Unknown',
+                away: d.away || 'Unknown',
+                commence_time: d.commence_time || '',
+                latest: {
+                    total: d.total || 0,
+                    over_juice: d.over_price || 0,
+                    under_juice: d.under_price || 0,
+                    ml_home: d.ml_home || 0,
+                    ml_away: d.ml_away || 0
+                }
             };
         });
         
-        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
+        st.innerHTML = '<span class="text-green-400 font-bold">● 已連線 Pinnacle</span>';
         renderToday();
     } catch(e) {
         console.error("fetchData 錯誤:", e);
         st.innerHTML = '<span class="text-red-400">連線失敗</span>';
+    } finally {
+        btn.disabled = false;
     }
 }
 
@@ -86,11 +95,11 @@ function renderToday() {
         <tr class="hover:bg-[#172a45]/30 text-sm border-b border-gray-800/50">
             <td class="p-4 text-gray-300">${g.commence_time.substring(11, 16)}</td>
             <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal text-xs">${g.away}</span></td>
-            <td class="p-4 font-black text-white text-lg">${g.total}</td>
-            <td class="p-4 text-xs"><span class="text-orange-400">O:${g.over_price}</span> / <span class="text-cyan-400">U:${g.under_price}</span></td>
-            <td class="p-4 text-xs">主:${g.ml_home} / 客:${g.ml_away}</td>
+            <td class="p-4 font-black text-white text-lg">${g.latest.total}</td>
+            <td class="p-4 text-xs"><span class="text-orange-400">O:${g.latest.over_juice}</span> / <span class="text-cyan-400">U:${g.latest.under_juice}</span></td>
+            <td class="p-4 text-xs">主:${g.latest.ml_home} / 客:${g.latest.ml_away}</td>
         </tr>
-    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">目前無盤口資料</td></tr>';
+    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">目前無盤口資料，請點擊更新</td></tr>';
 }
 
 function switchTab(tab) {
