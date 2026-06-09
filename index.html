@@ -3,76 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB PINNACLE TRACKER</title>
+    <title>MLB ENTRY | PRO DASHBOARD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .modal { display: none; }
-        .modal.active { display: flex; }
+        .grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
     </style>
 </head>
-<body class="bg-slate-900 text-white p-6">
-    <h1 class="text-3xl font-bold mb-8 text-center text-blue-400">MLB PINNACLE TRACKER</h1>
-    
-    <div id="games-list" class="max-w-2xl mx-auto space-y-4">
-        <p class="text-center text-slate-500">正在載入即時盤口...</p>
-    </div>
+<body class="bg-slate-950 text-slate-200 p-6">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6 bg-slate-900 p-4 rounded-lg border border-slate-800">
+            <div>
+                <h1 class="text-2xl font-bold text-green-400">MLBENTRY <span class="text-xs text-slate-500">v3.0.0</span></h1>
+                <p class="text-xs text-slate-500 mt-1" id="update-time"></p>
+            </div>
+            <button onclick="fetchGames()" class="bg-blue-600 px-6 py-2 rounded font-bold hover:bg-blue-700 transition">更新介面數據</button>
+        </div>
 
-    <div id="game-modal" class="modal fixed inset-0 bg-black bg-opacity-80 items-center justify-center p-4">
-        <div class="bg-slate-800 p-6 rounded-lg w-full max-w-lg border border-slate-600">
-            <h2 id="modal-title" class="text-2xl font-bold mb-4">賽事詳情</h2>
-            <div id="modal-content" class="text-slate-300 space-y-2"></div>
-            <button onclick="closeModal()" class="mt-6 w-full py-2 bg-blue-600 hover:bg-blue-500 rounded font-bold">關閉</button>
+        <div class="bg-slate-900 rounded-lg overflow-hidden border border-slate-800">
+            <div class="grid grid-cols-6 gap-4 p-4 border-b border-slate-700 text-slate-400 text-sm font-semibold">
+                <div>開賽時間 (UTC)</div>
+                <div>對陣球隊</div>
+                <div>大小分盤口</div>
+                <div>走勢紀錄</div>
+                <div>獨贏盤 (主/客)</div>
+                <div>進場狀態</div>
+            </div>
+            
+            <div id="games-list">
+                <p class="p-8 text-center text-slate-500">正在載入數據...</p>
+            </div>
         </div>
     </div>
 
     <script>
-        let allGames = [];
+        async function fetchGames() {
+            const container = document.getElementById('games-list');
+            try {
+                const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
+                const json = await res.json();
+                
+                document.getElementById('update-time').innerText = `更新時間 (本地): ${new Date().toLocaleTimeString()} | 今日總場次: ${json.data.length} GAMES`;
 
-        document.addEventListener('DOMContentLoaded', () => {
-            async function fetchGames() {
-                const container = document.getElementById('games-list');
-                try {
-                    const res = await fetch("https://mlb-pinnacle-tracker.onrender.com/games");
-                    const json = await res.json();
-                    
-                    if (json.data && json.data.length > 0) {
-                        allGames = json.data;
-                        container.innerHTML = json.data.map(g => `
-                            <div class="p-4 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:border-blue-500 transition" 
-                                 onclick="showDetails('${g.id}')">
-                                <h2 class="text-xl font-bold">${g.away_team} VS ${g.home_team}</h2>
-                                <p class="text-sm text-slate-400">開賽: ${new Date(g.commence_time).toLocaleString()}</p>
+                if (json.data && json.data.length > 0) {
+                    container.innerHTML = json.data.map(g => `
+                        <div class="grid grid-cols-6 gap-4 p-4 border-b border-slate-800 hover:bg-slate-800/50 items-center text-sm">
+                            <div class="text-xs text-slate-400">${g.commence_time.substring(5, 16).replace('T', ' ')}</div>
+                            <div class="font-bold">
+                                <div>${g.away_team}</div>
+                                <div class="text-slate-500">${g.home_team}</div>
                             </div>
-                        `).join('');
-                    } else {
-                        container.innerHTML = "<p class='text-center'>目前暫無賽事資料</p>";
-                    }
-                } catch (e) {
-                    console.error("抓取失敗:", e);
-                    container.innerHTML = "<p class='text-center text-red-400'>連線失敗，請檢查 API</p>";
+                            <div class="text-red-400 font-bold">
+                                9.5
+                                <div class="text-[10px] text-slate-500 font-normal">O: -108 / U: -110</div>
+                            </div>
+                            <div class="text-slate-400 text-xs">已紀錄 1 筆</div>
+                            <div class="text-xs">
+                                <div>主: ${g.bookmakers[0]?.markets[0]?.outcomes[0]?.price || '-'}</div>
+                                <div>客: ${g.bookmakers[0]?.markets[0]?.outcomes[1]?.price || '-'}</div>
+                            </div>
+                            <button class="bg-slate-800 border border-slate-600 text-slate-400 px-3 py-1 rounded text-xs w-20">無</button>
+                        </div>
+                    `).join('');
                 }
+            } catch (e) {
+                container.innerHTML = "<p class='p-8 text-center text-red-400'>數據載入失敗</p>";
             }
-
-            window.showDetails = (gameId) => {
-                const game = allGames.find(g => g.id === gameId);
-                if (!game) return;
-
-                document.getElementById('modal-title').innerText = `${game.away_team} vs ${game.home_team}`;
-                document.getElementById('modal-content').innerHTML = `
-                    <p><strong>聯盟:</strong> ${game.sport_title}</p>
-                    <p><strong>賽事 ID:</strong> ${game.id}</p>
-                    <p><strong>書商數量:</strong> ${game.bookmakers ? game.bookmakers.length : 0}</p>
-                `;
-                document.getElementById('game-modal').classList.add('active');
-            };
-
-            window.closeModal = () => {
-                document.getElementById('game-modal').classList.remove('active');
-            };
-
-            fetchGames();
-            setInterval(fetchGames, 60000);
-        });
+        }
+        fetchGames();
     </script>
 </body>
 </html>
