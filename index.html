@@ -8,20 +8,20 @@ async function fetchData() {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
         const json = await res.json();
         
-        // --- 核心除錯：強制在控制台印出資料結構 ---
-        console.log("=== API 返回的完整資料結構 ===");
+        // --- 【關鍵除錯】強制印出資料結構 ---
+        // 請務必在瀏覽器 Console 查看此處輸出的內容
+        console.log("=== API 返回的原始資料 ===");
         console.log(json); 
-        // ----------------------------------------
+        // ------------------------------------
         
+        // 嘗試自動處理資料層級
         const rawList = Array.isArray(json) ? json : (json.data || []);
         
         allGames = rawList.map(item => {
-            // 嘗試自動檢查 item.data 或 item 本身
-            const d = item.data || item; 
+            const d = item.data || item; // 假設資料可能在 .data 屬性內
             return {
-                // 這裡我們把所有可能的欄位名稱都列出來嘗試
-                home: d.home_team || d.home || d.team_home || 'Unknown',
-                away: d.away_team || d.away || d.team_away || 'Unknown',
+                home: d.home_team || d.home || 'Unknown',
+                away: d.away_team || d.away || 'Unknown',
                 commence_time: d.commence_time || '',
                 total: d.total || d.total_points || 0,
                 over_price: d.over_price || d.over || 0,
