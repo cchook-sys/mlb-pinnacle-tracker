@@ -1,103 +1,34 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLBENTRY v4 - Pinnacle 盤口監控</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0d1624; color: #e2e8f0; font-family: -apple-system, sans-serif; }
-        .tab-btn { transition: all .2s; cursor: pointer; }
-        .tab-btn.active { background:#1d4ed8; color:#fff; border-color:#3b82f6; }
-    </style>
-</head>
-<body class="p-4 md:p-6">
-    <div class="max-w-7xl mx-auto space-y-5">
-        <div class="bg-[#0f1b2d] rounded-xl border border-gray-800 p-5 flex flex-col lg:flex-row justify-between items-center gap-5">
-            <div>
-                <h1 class="text-3xl font-black text-white">MLB<span class="text-[#39ff14]">ENTRY</span></h1>
-                <div id="status-text" class="text-xs text-gray-500 mt-2">連線中...</div>
-            </div>
-            <button id="refresh-btn" onclick="fetchData()" class="bg-blue-600 px-5 py-3 rounded-lg font-bold text-sm hover:bg-blue-500 transition-all">更新盤口</button>
-        </div>
-
-        <div class="flex gap-2">
-            <button id="tab-today" onclick="switchTab('today')" class="tab-btn active px-5 py-2.5 rounded-lg text-sm font-bold border border-gray-700 text-gray-300">📡 今日盤口</button>
-            <button id="tab-history" onclick="switchTab('history')" class="tab-btn px-5 py-2.5 rounded-lg text-sm font-bold border border-gray-700 text-gray-500">📊 昨日結算</button>
-        </div>
-
-        <div id="view-today" class="bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
-            <table class="w-full text-left min-w-[980px]">
-                <thead class="bg-[#172a45] text-xs font-bold text-gray-400 uppercase">
-                    <tr><th class="p-4">開賽時間</th><th class="p-4">對陣</th><th class="p-4">大小分</th><th class="p-4">賠率 (O/U)</th><th class="p-4">獨贏 (主/客)</th></tr>
-                </thead>
-                <tbody id="today-tbody" class="divide-y divide-gray-800/50"></tbody>
-            </table>
-        </div>
-
-        <div id="view-history" class="hidden bg-[#132237] rounded-xl border border-gray-800 overflow-hidden">
-            <table class="w-full text-left min-w-[900px]">
-                <tbody id="history-tbody" class="divide-y divide-gray-800/50"></tbody>
-            </table>
-        </div>
-    </div>
-
-<script>
-const API = 'https://mlb-pinnacle-tracker.onrender.com';
-let allGames = [];
-
 async function fetchData() {
-    const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
-    btn.disabled = true; st.innerHTML = '正在更新...';
+    st.innerHTML = '正在更新...';
     
     try {
         const res = await fetch(API + '/games', { cache: 'no-cache' });
-        const data = await res.json();
+        const json = await res.json();
         
-        // 【關鍵修正】根據你的截圖，資料直接在 item 中，欄位為 home_team, away_team, total, over_price 等
-        allGames = (Array.isArray(data) ? data : []).map(item => ({
-            home: item.home_team || 'Unknown',
-            away: item.away_team || 'Unknown',
-            commence_time: item.commence_time || '', // 保持原始時間格式
-            total: item.total || 0,
-            over_price: item.over_price || 0,
-            under_price: item.under_price || 0,
-            ml_home: item.ml_home_price || 0, // 對應截圖中的 ml_home_price
-            ml_away: item.ml_away_price || 0  // 對應截圖中的 ml_away_price
-        }));
+        // 【除錯關鍵】請務必打開瀏覽器 F12 -> Console，點開這條 Log 檢查結構
+        console.log("後端回傳的完整資料結構:", json);
+
+        allGames = (json || []).map(item => {
+            // 這裡我們需要根據 Console 看到的「真實欄位」進行對應
+            // 如果這場比賽的總分欄位叫 "total_points" 而不是 "total"，這裡就必須修改
+            return {
+                home: item.home_team || 'Unknown',
+                away: item.away_team || 'Unknown',
+                commence_time: item.commence_time || '',
+                // 這裡假設後端回傳的結構中，這些資料是在 item 裡面
+                total: item.total || 0, 
+                over_price: item.over_price || 0,
+                under_price: item.under_price || 0,
+                ml_home: item.ml_home_price || 0,
+                ml_away: item.ml_away_price || 0
+            };
+        });
         
         st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
         renderToday();
     } catch(e) {
         console.error("fetchData 錯誤:", e);
         st.innerHTML = '<span class="text-red-400">連線失敗</span>';
-    } finally {
-        btn.disabled = false;
     }
 }
-
-function renderToday() {
-    const tbody = document.getElementById('today-tbody');
-    tbody.innerHTML = allGames.length > 0 ? allGames.map(g => `
-        <tr class="hover:bg-[#172a45]/30 text-sm border-b border-gray-800/50">
-            <td class="p-4 text-gray-300">${g.commence_time}</td>
-            <td class="p-4 font-bold text-white">${g.home}<br><span class="text-gray-500 font-normal text-xs">${g.away}</span></td>
-            <td class="p-4 font-black text-white text-lg">${g.total}</td>
-            <td class="p-4 text-xs"><span class="text-orange-400">O:${g.over_price}</span> / <span class="text-cyan-400">U:${g.under_price}</span></td>
-            <td class="p-4 text-xs">主:${g.ml_home} / 客:${g.ml_away}</td>
-        </tr>
-    `).join('') : '<tr><td colspan="5" class="p-10 text-center text-gray-500">暫無資料</td></tr>';
-}
-
-function switchTab(tab) {
-    document.getElementById('view-today').classList.toggle('hidden', tab !== 'today');
-    document.getElementById('view-history').classList.toggle('hidden', tab !== 'history');
-    document.getElementById('tab-today').classList.toggle('active', tab === 'today');
-    document.getElementById('tab-history').classList.toggle('active', tab === 'history');
-}
-
-window.onload = fetchData;
-</script>
-</body>
-</html>
