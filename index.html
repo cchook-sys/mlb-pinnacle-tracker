@@ -2,49 +2,47 @@ async function fetchData() {
     const btn = document.getElementById('refresh-btn');
     const st = document.getElementById('status-text');
 
+    // 強制顯示正在更新
+    st.innerHTML = '<span class="text-yellow-400">正在刷新數據...</span>';
     btn.disabled = true;
-    st.innerHTML = '更新中...';
 
     try {
         const res = await fetch(API + '/games');
-        const result = await res.json();
+        const json = await res.json();
         
-        // 【關鍵修正】：確保 allGames 永遠是一個陣列
-        // 檢查 API 回傳結構 (假設 API 回傳 {data: [...]})
-        const rawData = result.data || result || []; 
-        
-        // 將資料重新整理成前端需要的格式 (包含預設值防止 .reduce 報錯)
-        allGames = rawData.map(item => {
-            const d = item.data || {};
+        // 【除錯檢查】在 Console 印出後端回傳的原始結構
+        console.log("後端回傳資料:", json);
+
+        // 如果 json.data 是陣列，直接賦值
+        allGames = Array.isArray(json.data) ? json.data.map(item => {
+            const d = item.data;
             return {
                 id: item.game_id,
-                home: d.home || 'Unknown',
-                away: d.away || 'Unknown',
+                home: d.home,
+                away: d.away,
                 commence_time: d.commence_time,
-                snapshot_count: item.snapshot_count || 0,
-                // 補上預設結構，防止後續計算報錯
                 latest: {
-                    total: d.total || 0,
-                    over_juice: d.over_price || 0,
-                    under_juice: d.under_price || 0,
-                    ml_home: d.ml_home || 0,
-                    ml_away: d.ml_away || 0
+                    total: d.total,
+                    over_juice: d.over_price,
+                    under_juice: d.under_price,
+                    ml_home: d.ml_home,
+                    ml_away: d.ml_away
                 },
-                history: [{total: d.total || 0}] 
+                snapshot_count: 1, // 預設值
+                history: [{total: d.total}]
             };
-        });
+        }) : [];
 
+        // 渲染畫面
+        renderToday();
+        
+        // 更新狀態文字
         st.innerHTML = '<span class="text-green-400 font-bold">● 已連線</span>';
         document.getElementById('games-count').textContent = allGames.length;
-        
-        // 現在 allGames 保證是陣列了，reduce 就不會報錯
-        document.getElementById('snaps-count').textContent = allGames.reduce((s, g) => s + (g.snapshot_count || 0), 0);
 
-        renderToday();
-        fetchStats();
     } catch(e) {
-        console.error(e);
-        st.innerHTML = '<span class="text-red-400">數據格式錯誤</span>';
+        console.error("fetchData 錯誤:", e);
+        st.innerHTML = '<span class="text-red-400">連線失敗，請檢查 Console</span>';
     } finally {
         btn.disabled = false;
     }
