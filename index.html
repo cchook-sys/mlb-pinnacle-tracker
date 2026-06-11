@@ -3,82 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLBENTRY - Pinnacle 盤口監控</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <title>MLB Pinnacle 智能量化儀表板</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --bg:#0a0f1a; --surface:#111827; --card:#0d1b2e; --border:#1e3a5f; --text:#e6edf3; --dim:#4b5563; --accent:#39ff14; --blue:#3b82f6; --orange:#f97316; --cyan:#38bdf8; }
-        body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; height: 100vh; display: flex; flex-direction: column; }
-        .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-size: 22px; font-weight: 900; letter-spacing: 3px; color: #fff; }
-        .logo span { color: var(--accent); }
-        .btn { cursor: pointer; padding: 8px 15px; border-radius: 5px; border: none; font-weight: bold; background: #1d4ed8; color: #fff; transition: 0.2s; }
-        .btn:hover { background: #2563eb; }
-        .main { display: flex; flex: 1; overflow: hidden; }
-        #glist { width: 360px; overflow-y: auto; border-right: 1px solid var(--border); }
-        #dpanel { flex: 1; padding: 25px; overflow-y: auto; display: flex; align-items: center; justify-content: center; }
-        .game-item { padding: 20px; border-bottom: 1px solid var(--border); cursor: pointer; transition: 0.2s; }
-        .game-item:hover { background: #111827; }
-        .card-style { background: #0d1b2e; padding: 30px; border-radius: 12px; border: 1px solid #1e3a5f; width: 100%; max-width: 600px; }
+        :root { --bg:#0b1120; --card:#1e293b; --accent:#38bdf8; --text:#f1f5f9; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; padding: 20px; }
+        .header { margin-bottom: 20px; }
+        .title { font-size: 24px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+        .status { background: #064e3b; color: #34d399; padding: 4px 10px; border-radius: 20px; font-size: 12px; }
+        .stats-box { background: var(--card); padding: 15px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 20px; width: fit-content; }
+        
+        .game-card { background: var(--card); border: 2px solid #334155; border-radius: 16px; padding: 20px; margin-bottom: 15px; transition: 0.3s; }
+        .game-card:hover { border-color: var(--accent); }
+        .teams { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+        .meta { font-size: 12px; color: #94a3b8; margin-bottom: 15px; }
+        .metrics { display: flex; gap: 20px; font-size: 14px; }
+        .val { font-weight: 700; color: var(--accent); }
+        .sleep-btn { background: #1e293b; color: #64748b; padding: 5px 12px; border-radius: 8px; font-size: 12px; float: right; border: 1px solid #334155; }
     </style>
 </head>
 <body>
 
-<div class="topbar">
-    <div>
-        <div class="logo">MLB<span>ENTRY</span></div>
-        <div id="status" style="font-size: 11px; color: var(--dim);">狀態: <span id="si">連線中...</span></div>
-    </div>
-    <button class="btn" onclick="fetchData()">↺ 更新盤口</button>
+<div class="header">
+    <div class="title">⚾ MLB Pinnacle <span class="status">● 已連線</span></div>
+    <p style="color:#64748b; font-size: 14px; margin-top:10px;">即時監控美金盤精準資金流向，全自動捕捉大小分與獨贏蒸氣盤進場訊號</p>
 </div>
 
-<div class="main">
-    <div id="glist"></div>
-    <div id="dpanel"><div style="color:var(--dim)">請點擊左側場次查看數據</div></div>
+<div class="stats-box">
+    <div>資料庫來源: <span style="color:var(--accent)">MongoDB Atlas</span></div>
+    <div>更新頻率: <span style="color:#fbbf24">10 分鐘智慧過濾</span></div>
 </div>
+
+<div id="glist">載入中...</div>
 
 <script>
 const API = 'https://mlb-pinnacle-tracker.onrender.com';
-let games = [];
-
 async function fetchData() {
-    const si = document.getElementById('si');
-    si.textContent = '抓取中...';
     try {
         const r = await fetch(`${API}/games`, { mode: 'cors', cache: 'no-store' });
-        games = await r.json();
-        si.innerHTML = '<span style="color:#39ff14">● 已連線</span>';
-        
+        const games = await r.json();
         const list = document.getElementById('glist');
         list.innerHTML = games.map(g => `
-            <div class="game-item" onclick="selectGame('${g.game_id}')">
-                <div style="font-weight:bold; margin-bottom:5px;">${g.away} VS ${g.home}</div>
-                <div style="color:var(--cyan)">總分: ${g.latest?.total ?? '--'}</div>
+            <div class="game-card">
+                <button class="sleep-btn">💤 觀望中</button>
+                <div class="meta">06/03 06:41 · 快照:${g.snapshot_count || 0}</div>
+                <div class="teams">${g.away} 客 VS ${g.home} 主</div>
+                <div class="metrics">
+                    <div>大小分變動: <span class="val">0</span></div>
+                    <div>主獨贏變動: <span class="val" style="color:${(g.latest?.ml_home||0) < 0 ? '#f87171' : '#38bdf8'}">${g.latest?.ml_home || 0}</span></div>
+                </div>
             </div>
         `).join('');
-    } catch(e) {
-        si.textContent = '✕ 連線錯誤';
-        console.error(e);
-    }
+    } catch(e) { document.getElementById('glist').innerHTML = "連線失敗"; }
 }
-
-function selectGame(id) {
-    const g = games.find(g => g.game_id === id);
-    if (!g) return;
-    document.getElementById('dpanel').innerHTML = `
-        <div class="card-style">
-            <h2 style="margin-bottom:20px; border-bottom:1px solid #1e3a5f; padding-bottom:10px;">${g.away} VS ${g.home}</h2>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-                <div><p style="color:var(--dim); font-size:12px">目前總分</p><p style="font-size:32px; font-weight:900">${g.latest?.total ?? '--'}</p></div>
-                <div><p style="color:var(--dim); font-size:12px">開盤總分</p><p style="font-size:32px; font-weight:900; color:var(--dim)">${g.open?.total ?? '--'}</p></div>
-                <div style="color:var(--orange)">Over 賠率: ${g.latest?.over_juice ?? '--'}</div>
-                <div style="color:var(--cyan)">Under 賠率: ${g.latest?.under_juice ?? '--'}</div>
-            </div>
-            <p style="margin-top:20px; color:var(--dim); font-size:10px;">最後更新: ${new Date().toLocaleString()}</p>
-        </div>
-    `;
-}
-
 window.onload = fetchData;
 </script>
 </body>
