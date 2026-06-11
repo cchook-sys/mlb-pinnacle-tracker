@@ -1,72 +1,436 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MLB Pinnacle Tracker</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-white p-5">
-    <div class="max-w-4xl mx-auto">
-        <h1 class="text-2xl font-bold mb-4">MLB 盤口即時監控</h1>
-        <div id="status-box" class="p-3 mb-4 rounded bg-gray-800">
-            狀態: <span id="status-text" class="text-yellow-400">連線中...</span>
-        </div>
-        
-        <table class="w-full text-sm text-left">
-            <thead class="text-xs uppercase bg-gray-700">
-                <tr>
-                    <th class="px-4 py-2">對戰隊伍</th>
-                    <th class="px-4 py-2">目前總分 (Total)</th>
-                    <th class="px-4 py-2">訊號 (Signal)</th>
-                </tr>
-            </thead>
-            <tbody id="game-table" class="divide-y divide-gray-700">
-                </tbody>
-        </table>
-    </div>
+ bash
 
-    <script>
-        const API_URL = 'https://mlb-pinnacle-tracker.onrender.com';
+cat > /mnt/user-data/outputs/main.py << 'ENDOFFILE'
+"""
+MLB Pinnacle Tracker v4.1
+- 智慧排程：ET 08:00–23:00 每 30 分鐘抓取，其餘時間睡眠
+- 盤口沒變動不存快照（節省 MongoDB 空間）
+- GET /refresh 可手動喚醒立即抓取
+- MongoDB 持久化 + 自動賽果結算
+"""
 
-        async function loadGames() {
-            const statusText = document.getElementById('status-text');
-            const tableBody = document.getElementById('game-table');
+import os, asyncio, logging
+from datetime import datetime, timezone, timedelta
+from contextlib import asynccontextmanager
 
-            try {
-                // cache: 'no-store' 確保強制讀取最新資料
-                const res = await fetch(`${API_URL}/games`, { cache: 'no-store' });
-                
-                if (!res.ok) throw new Error(`HTTP 錯誤: ${res.status}`);
-                
-                const data = await res.json();
-                statusText.textContent = '資料已更新 (' + new Date().toLocaleTimeString() + ')';
-                statusText.className = 'text-green-400';
+import httpx
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
 
-                // 清空並寫入資料
-                tableBody.innerHTML = '';
-                data.forEach(game => {
-                    const row = `
-                        <tr class="hover:bg-gray-800">
-                            <td class="px-4 py-2">${game.away} @ ${game.home}</td>
-                            <td class="px-4 py-2">${game.latest?.total || 'N/A'}</td>
-                            <td class="px-4 py-2 font-bold ${game.signal?.total?.includes('STEAM') ? 'text-red-400' : 'text-blue-400'}">
-                                ${game.signal?.total || '-'}
-                            </td>
-                        </tr>
-                    `;
-                    tableBody.innerHTML += row;
-                });
-            } catch (err) {
-                console.error("連線錯誤細節:", err);
-                statusText.textContent = '連線失敗，請檢查 Render 是否正常運作';
-                statusText.className = 'text-red-400';
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+log = logging.getLogger(__name__)
+
+# ── Config ────────────────────────────────────────────────────────────────────
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+MONGO_URI    = os.getenv("MONGO_URI", "")
+BOOKMAKER    = "pinnacle"
+SPORT        = "baseball_mlb"
+ODDS_BASE    = f"https://api.the-odds-api.com/v4/sports/{SPORT}"
+
+# 排程設定（ET 時間）
+ACTIVE_START = 8   # 08:00 ET 開始
+ACTIVE_END   = 23  # 23:00 ET 結束
+FETCH_INTERVAL_MINS = 30  # 主動抓取間隔（分鐘）
+
+client_db = None
+db        = None
+_last_fetch_ts = None  # 上次成功抓取時間
+
+def get_db():
+    return db
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def utc_now():
+    return datetime.now(timezone.utc)
+
+def et_now():
+    return utc_now().astimezone(timezone(timedelta(hours=-4)))
+
+def et_date_str(dt=None):
+    if dt is None:
+        dt = utc_now()
+    return dt.astimezone(timezone(timedelta(hours=-4))).strftime("%Y-%m-%d")
+
+def is_active_hours() -> bool:
+    """ET 08:00–23:00 為活躍時段"""
+    h = et_now().hour
+    return ACTIVE_START <= h < ACTIVE_END
+
+def signal_from_snaps(snaps: list) -> dict:
+    valid = [s for s in snaps if s.get("total") is not None]
+    if len(valid) < 2:
+        return {"total": "FLAT", "ml": "FLAT", "delta": 0}
+    td = round(valid[-1]["total"] - valid[0]["total"], 1)
+    ts = ("STEAM_OVER"  if td >= 0.5  else
+          "LEAN_OVER"   if td >= 0.25 else
+          "STEAM_UNDER" if td <= -0.5 else
+          "LEAN_UNDER"  if td <= -0.25 else "FLAT")
+    mld = (valid[-1].get("ml_home") or 0) - (valid[0].get("ml_home") or 0)
+    ms  = ("STEAM_HOME" if mld <= -15 else "STEAM_AWAY" if mld >= 15 else "FLAT")
+    return {"total": ts, "ml": ms, "delta": td}
+
+def pick_from_signal(sig, game):
+    d     = sig.get("delta", 0)
+    total = game.get("latest", {}).get("total")
+    if d >= 0.25:  return f"OVER {total}"
+    if d <= -0.25: return f"UNDER {total}"
+    return None
+
+# ── Fetch Odds ────────────────────────────────────────────────────────────────
+async def fetch_and_store_odds(force: bool = False) -> dict:
+    """
+    抓取 Pinnacle 盤口並存入 MongoDB
+    force=True 時跳過時段限制（手動觸發）
+    回傳 {"stored": int, "skipped": int, "remaining": str}
+    """
+    global _last_fetch_ts
+
+    if not ODDS_API_KEY:
+        return {"error": "ODDS_API_KEY not set"}
+
+    if not force and not is_active_hours():
+        h = et_now().hour
+        log.info(f"😴 睡眠時段 ET {h:02d}:00，跳過抓取")
+        return {"skipped": "sleep_hours", "et_hour": h}
+
+    try:
+        url = (f"{ODDS_BASE}/odds/"
+               f"?apiKey={ODDS_API_KEY}&regions=us"
+               f"&markets=h2h,totals,spreads&bookmakers={BOOKMAKER}&oddsFormat=american")
+
+        async with httpx.AsyncClient(timeout=25) as c:
+            r = await c.get(url)
+
+        remaining = r.headers.get("x-requests-remaining", "?")
+        log.info(f"Odds API {r.status_code} | remaining={remaining} | force={force}")
+
+        if r.status_code != 200:
+            log.error(f"Odds error: {r.text[:200]}")
+            return {"error": f"API {r.status_code}"}
+
+        games   = r.json()
+        ts      = utc_now()
+        today   = et_date_str(ts)
+        coll    = get_db()["snapshots"]
+        stored  = 0
+        skipped = 0
+
+        for g in games:
+            pin     = next((b for b in g.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
+            if not pin:
+                continue
+            totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
+            h2h     = next((m for m in pin["markets"] if m["key"] == "h2h"),     None)
+            spreads = next((m for m in pin["markets"] if m["key"] == "spreads"), None)
+
+            over    = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Over"),          None)
+            under   = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Under"),         None)
+            ml_home = next((o for o in (h2h     or {}).get("outcomes", []) if o["name"] == g["home_team"]), None)
+            ml_away = next((o for o in (h2h     or {}).get("outcomes", []) if o["name"] == g["away_team"]), None)
+            sp_home = next((o for o in (spreads or {}).get("outcomes", []) if o["name"] == g["home_team"]), None)
+
+            snap = {
+                "ts":          ts,
+                "total":       over["point"]    if over    else None,
+                "over_juice":  over["price"]    if over    else None,
+                "under_juice": under["price"]   if under   else None,
+                "ml_home":     ml_home["price"] if ml_home else None,
+                "ml_away":     ml_away["price"] if ml_away else None,
+                "spread_home": sp_home["point"] if sp_home else None,
             }
-        }
 
-        // 每 60 秒自動刷新
-        loadGames();
-        setInterval(loadGames, 60000);
-    </script>
-</body>
-</html>
+            existing = await coll.find_one({"game_id": g["id"], "date": today})
+            if existing:
+                prev_snaps = existing.get("snapshots", [])
+                last = prev_snaps[-1] if prev_snaps else {}
+
+                # ── 只有數據真的變動才存新快照 ──────────────────────────────
+                total_changed   = last.get("total")   != snap["total"]
+                ml_changed      = last.get("ml_home") != snap["ml_home"]
+                juice_changed   = last.get("over_juice") != snap["over_juice"]
+                anything_changed = total_changed or ml_changed or juice_changed
+
+                if not anything_changed:
+                    skipped += 1
+                    continue  # 跳過，不浪費儲存空間
+
+                new_snaps = prev_snaps[-49:] + [snap]
+                sig = signal_from_snaps(new_snaps)
+                await coll.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "snapshots":  new_snaps,
+                        "latest":     snap,
+                        "signal":     sig,
+                        "updated_at": ts,
+                    }}
+                )
+                stored += 1
+            else:
+                sig = signal_from_snaps([snap])
+                await coll.insert_one({
+                    "game_id":       g["id"],
+                    "date":          today,
+                    "home":          g["home_team"],
+                    "away":          g["away_team"],
+                    "commence_time": g["commence_time"],
+                    "snapshots":     [snap],
+                    "open":          snap,
+                    "latest":        snap,
+                    "signal":        sig,
+                    "created_at":    ts,
+                    "updated_at":    ts,
+                })
+                stored += 1
+
+        _last_fetch_ts = ts
+        log.info(f"✅ stored={stored} skipped(no change)={skipped} total={len(games)} remaining={remaining}")
+        return {"stored": stored, "skipped_no_change": skipped, "total_games": len(games), "remaining": remaining}
+
+    except Exception as e:
+        log.error(f"fetch_odds error: {e}")
+        return {"error": str(e)}
+
+# ── Fetch Scores & Settle ─────────────────────────────────────────────────────
+async def fetch_and_settle():
+    if not ODDS_API_KEY:
+        return
+    try:
+        url = f"{ODDS_BASE}/scores/?apiKey={ODDS_API_KEY}&daysFrom=1&dateFormat=iso"
+        async with httpx.AsyncClient(timeout=25) as c:
+            r = await c.get(url)
+        if r.status_code != 200:
+            return
+
+        scores    = r.json()
+        ts        = utc_now()
+        yesterday = et_date_str(ts - timedelta(days=1))
+        snaps_col = get_db()["snapshots"]
+        hist_col  = get_db()["history"]
+        settled   = 0
+
+        for s in scores:
+            if not s.get("completed"):
+                continue
+            score_data = s.get("scores") or []
+            if len(score_data) < 2:
+                continue
+            try:
+                total_runs = sum(int(sc["score"]) for sc in score_data)
+            except Exception:
+                continue
+
+            game_doc = await snaps_col.find_one({"game_id": s["id"], "date": yesterday})
+            if not game_doc:
+                game_doc = await snaps_col.find_one({"game_id": s["id"]})
+            if not game_doc:
+                continue
+
+            snaps  = game_doc.get("snapshots", [])
+            sig    = signal_from_snaps(snaps)
+            pick   = pick_from_signal(sig, game_doc)
+            total  = (game_doc.get("open") or {}).get("total")
+            result = None
+
+            if pick and total:
+                if "OVER"  in pick: result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
+                if "UNDER" in pick: result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
+
+            entry = {
+                "game_id":       s["id"],
+                "date":          yesterday,
+                "home":          game_doc["home"],
+                "away":          game_doc["away"],
+                "commence_time": game_doc["commence_time"],
+                "open_total":    total,
+                "close_total":   (game_doc.get("latest") or {}).get("total"),
+                "total_delta":   sig.get("delta", 0),
+                "signal":        sig,
+                "pick":          pick,
+                "actual_total":  total_runs,
+                "result":        result,
+                "settled_at":    ts,
+            }
+            await hist_col.update_one(
+                {"game_id": s["id"], "date": yesterday},
+                {"$set": entry},
+                upsert=True
+            )
+            await snaps_col.update_one(
+                {"_id": game_doc["_id"]},
+                {"$set": {"result": result, "actual_total": total_runs}}
+            )
+            settled += 1
+
+        # 清除 2 天前舊記錄
+        cutoff = et_date_str(ts - timedelta(days=2))
+        await hist_col.delete_many({"date": {"$lt": cutoff}})
+        log.info(f"✅ Settled {settled} games | cutoff={cutoff}")
+
+    except Exception as e:
+        log.error(f"settle error: {e}")
+
+# ── Smart Scheduler ───────────────────────────────────────────────────────────
+async def scheduler():
+    """
+    智慧排程：
+    - ET 08:00–23:00：每 30 分鐘抓取
+    - ET 00:00–08:00：睡眠，每 5 分鐘檢查是否到了活躍時段
+    """
+    while True:
+        if is_active_hours():
+            await fetch_and_store_odds()
+            await fetch_and_settle()
+            log.info(f"⏰ 下次抓取：{FETCH_INTERVAL_MINS} 分鐘後")
+            await asyncio.sleep(FETCH_INTERVAL_MINS * 60)
+        else:
+            et = et_now()
+            # 計算到下一個活躍時段還有多久
+            if et.hour < ACTIVE_START:
+                mins_to_active = (ACTIVE_START - et.hour) * 60 - et.minute
+            else:
+                # 超過 23:00，等到明天 08:00
+                mins_to_active = (24 - et.hour + ACTIVE_START) * 60 - et.minute
+
+            log.info(f"😴 睡眠中 ET {et.strftime('%H:%M')}，距離活躍時段 {mins_to_active} 分鐘")
+            # 最多等 5 分鐘就重新檢查（避免錯過活躍時段開始）
+            await asyncio.sleep(min(5 * 60, mins_to_active * 60))
+
+# ── App Startup ───────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client_db, db
+    if MONGO_URI:
+        client_db = AsyncIOMotorClient(MONGO_URI)
+        db        = client_db["mlb_tracker"]
+        await db["snapshots"].create_index([("game_id", 1), ("date", 1)], unique=True)
+        await db["history"].create_index([("game_id", 1), ("date", 1)],   unique=True)
+        log.info("✅ MongoDB connected")
+    else:
+        log.error("MONGO_URI not set!")
+
+    # 啟動時立刻抓一次（不管時段）
+    await fetch_and_store_odds(force=True)
+    await fetch_and_settle()
+
+    asyncio.create_task(scheduler())
+    log.info(f"⏰ Scheduler: active ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00, interval={FETCH_INTERVAL_MINS}min")
+    yield
+    if client_db:
+        client_db.close()
+
+app = FastAPI(title="MLB Pinnacle Tracker v4.1", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+@app.get("/")
+async def root():
+    et   = et_now()
+    active = is_active_hours()
+    return {
+        "status":      "ok",
+        "version":     "4.1",
+        "et_time":     et.strftime("%Y-%m-%d %H:%M ET"),
+        "active":      active,
+        "schedule":    f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
+        "last_fetch":  _last_fetch_ts.isoformat() if _last_fetch_ts else None,
+    }
+
+@app.get("/refresh")
+async def manual_refresh():
+    """手動觸發立即抓取（前端按更新時呼叫，跳過時段限制）"""
+    log.info("🖱️ 手動觸發抓取")
+    result = await fetch_and_store_odds(force=True)
+    await fetch_and_settle()
+    return {"triggered": True, **result}
+
+@app.get("/games")
+async def get_games():
+    today = et_date_str()
+    docs  = await get_db()["snapshots"].find({"date": today}).sort("commence_time", 1).to_list(50)
+    result = []
+    for d in docs:
+        snaps = d.get("snapshots", [])
+        first = snaps[0]  if snaps else {}
+        last  = snaps[-1] if snaps else {}
+        sig   = signal_from_snaps(snaps)
+        hist  = []
+        for s in snaps:
+            ts_val = s.get("ts")
+            hist.append({
+                "ts":          ts_val.isoformat() if isinstance(ts_val, datetime) else str(ts_val),
+                "total":       s.get("total"),
+                "over_juice":  s.get("over_juice"),
+                "under_juice": s.get("under_juice"),
+                "ml_home":     s.get("ml_home"),
+                "ml_away":     s.get("ml_away"),
+            })
+        result.append({
+            "game_id":        d["game_id"],
+            "home":           d["home"],
+            "away":           d["away"],
+            "commence_time":  d["commence_time"],
+            "snapshot_count": len(snaps),
+            "open":    {"total": first.get("total"), "ml_home": first.get("ml_home"), "ml_away": first.get("ml_away")},
+            "latest":  {"total": last.get("total"),  "over_juice": last.get("over_juice"),
+                        "under_juice": last.get("under_juice"), "ml_home": last.get("ml_home"),
+                        "ml_away": last.get("ml_away"), "spread_home": last.get("spread_home")},
+            "delta":   {"total": sig["delta"]},
+            "signal":  {"total": sig["total"], "ml": sig["ml"]},
+            "history": hist,
+            "result":        d.get("result"),
+            "actual_total":  d.get("actual_total"),
+        })
+    return result
+
+@app.get("/history")
+async def get_history():
+    yesterday = et_date_str(utc_now() - timedelta(days=1))
+    docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time", 1).to_list(30)
+    result    = []
+    for d in docs:
+        result.append({
+            "game_id":       d["game_id"],
+            "home":          d["home"],
+            "away":          d["away"],
+            "commence_time": d["commence_time"],
+            "date":          d["date"],
+            "open_total":    d.get("open_total"),
+            "close_total":   d.get("close_total"),
+            "total_delta":   d.get("total_delta", 0),
+            "pick":          d.get("pick"),
+            "actual_total":  d.get("actual_total"),
+            "result":        d.get("result"),
+            "signal":        d.get("signal", {}),
+        })
+    return result
+
+@app.get("/stats")
+async def get_stats():
+    docs   = await get_db()["history"].find({"result": {"$in": ["WIN","LOSS","PUSH"]}}).to_list(200)
+    wins   = sum(1 for d in docs if d.get("result") == "WIN")
+    losses = sum(1 for d in docs if d.get("result") == "LOSS")
+    pushes = sum(1 for d in docs if d.get("result") == "PUSH")
+    total  = wins + losses
+    return {
+        "wins": wins, "losses": losses, "pushes": pushes,
+        "total": total + pushes,
+        "win_rate": round(wins / total * 100, 1) if total > 0 else 0,
+        "roi": round((wins * 0.91 - losses) / total * 100, 1) if total > 0 else 0,
+    }
+ENDOFFILE
+echo "main.py: $(wc -l < /mnt/user-data/outputs/main.py) lines"
+Output
+
+main.py: 425 lines
+Done
+
+You are out of free messages 
