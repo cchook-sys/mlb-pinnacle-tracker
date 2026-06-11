@@ -9,771 +9,586 @@ cat > /mnt/user-data/outputs/index.html << 'ENDOFFILE'
 <title>MLBENTRY - Pinnacle 盤口監控</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-:root {
-  --bg:       #0a0f1a;
-  --surface:  #111827;
-  --card:     #0f1e35;
-  --border:   #1e3a5f;
-  --border2:  #243044;
-  --text:     #e6edf3;
-  --muted:    #8b949e;
-  --dim:      #4b5563;
-  --accent:   #39ff14;
-  --blue:     #3b82f6;
-  --orange:   #f97316;
-  --cyan:     #38bdf8;
-  --red:      #f87171;
-  --yellow:   #fbbf24;
-  --green:    #4ade80;
-}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;}
-::-webkit-scrollbar{width:4px;height:4px;}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+:root{
+  --bg:#0a0f1a; --surface:#111827; --card:#0d1b2e; --border:#1e3a5f;
+  --text:#e6edf3; --muted:#8b949e; --dim:#4b5563;
+  --accent:#39ff14; --blue:#3b82f6; --orange:#f97316;
+  --cyan:#38bdf8; --red:#f87171; --yellow:#fbbf24; --green:#4ade80;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:2px;}
 
-/* LAYOUT */
-.layout{display:grid;grid-template-rows:auto auto 1fr;height:100vh;overflow:hidden;}
-.header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
-.tabs-bar{background:var(--bg);border-bottom:1px solid var(--border2);padding:8px 20px;display:flex;gap:8px;flex-shrink:0;}
-.main-area{display:grid;grid-template-columns:380px 1fr;overflow:hidden;}
-.sidebar{border-right:1px solid var(--border2);overflow-y:auto;display:flex;flex-direction:column;}
-.detail-panel{overflow-y:auto;padding:20px;}
-
-/* HEADER */
-.logo{display:flex;align-items:baseline;gap:0;}
-.logo-mlb{font-size:26px;font-weight:900;letter-spacing:3px;color:var(--text);}
-.logo-pin{font-size:26px;font-weight:900;letter-spacing:3px;color:var(--accent);}
-.header-meta{display:flex;gap:12px;align-items:center;font-size:11px;color:var(--dim);margin-top:3px;}
-.status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;}
-.status-dot.ok{background:var(--accent);animation:pulse 2s ease-in-out infinite;}
-.status-dot.err{background:var(--red);}
-.status-dot.loading{background:var(--yellow);}
-
-.header-right{display:flex;gap:10px;align-items:center;}
-.stat-group{display:flex;gap:16px;background:#09101a;border:1px solid var(--border);border-radius:6px;padding:8px 16px;}
+/* ── TOP BAR ── */
+.topbar{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  padding:10px 20px;display:flex;justify-content:space-between;align-items:center;
+  position:sticky;top:0;z-index:50;flex-shrink:0;
+}
+.logo{font-size:22px;font-weight:900;letter-spacing:3px;}
+.logo span{color:var(--accent);}
+.topbar-meta{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--dim);margin-top:2px;}
+.topbar-right{display:flex;gap:8px;align-items:center;}
+.stat-row{display:flex;gap:12px;background:#09101a;border:1px solid var(--border);border-radius:5px;padding:6px 14px;}
 .stat{text-align:center;}
-.stat-label{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;}
-.stat-value{font-size:20px;font-weight:900;font-family:monospace;line-height:1.2;}
+.stat-lbl{font-size:8px;color:var(--dim);letter-spacing:1px;}
+.stat-val{font-size:18px;font-weight:900;font-family:monospace;line-height:1.2;}
+.btn{border:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:11px;padding:7px 14px;border-radius:5px;display:flex;align-items:center;gap:5px;transition:all .15s;letter-spacing:.3px;}
+.btn-blue{background:#1d4ed8;color:#fff;} .btn-blue:hover{background:#2563eb;}
+.btn-green{background:#0f2d0f;color:var(--accent);border:1px solid rgba(57,255,20,.3);} .btn-green:hover{background:#153d15;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
 
-.btn{border:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:12px;letter-spacing:.5px;padding:8px 16px;border-radius:6px;transition:all .15s;display:flex;align-items:center;gap:6px;}
-.btn-refresh{background:var(--blue);color:#fff;}
-.btn-refresh:hover{background:#2563eb;}
-.btn-refresh:disabled{background:var(--border);color:var(--dim);cursor:not-allowed;}
-.btn-parlay{background:#0f2d0f;color:var(--accent);border:1px solid rgba(57,255,20,.35);}
-.btn-parlay:hover{background:#153d15;}
+/* ── TAB BAR ── */
+.tabbar{background:var(--bg);border-bottom:1px solid #1a2535;padding:8px 20px;display:flex;gap:6px;flex-shrink:0;}
+.tab{background:transparent;border:1px solid #1e3a5f;color:var(--dim);padding:5px 14px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;}
+.tab.on{background:#1d4ed8;border-color:#3b82f6;color:#fff;}
+.tab:hover:not(.on){color:var(--muted);}
 
-/* TABS */
-.tab-btn{background:transparent;border:1px solid var(--border2);color:var(--dim);padding:6px 16px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;letter-spacing:.5px;}
-.tab-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
-.tab-btn:hover:not(.active){color:var(--muted);border-color:var(--muted);}
+/* ── MAIN SPLIT ── */
+.main{display:flex;height:calc(100vh - 93px);overflow:hidden;}
 
-/* SIDEBAR GAME CARD */
-.game-card{padding:14px 16px;border-bottom:1px solid var(--border2);cursor:pointer;transition:background .15s;border-left:3px solid transparent;}
-.game-card:hover{background:rgba(255,255,255,.04);}
-.game-card.active{background:var(--card);border-left-color:var(--blue);}
-.game-card.steam-over{border-left-color:var(--orange);}
-.game-card.steam-under{border-left-color:var(--cyan);}
-.game-card.signal-ready{border-left-color:var(--accent);}
+/* ── LEFT SIDEBAR ── */
+.sidebar{width:360px;flex-shrink:0;overflow-y:auto;border-right:1px solid #1a2535;}
+.sidebar-empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:12px;}
 
-.gc-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;}
-.gc-time{font-size:10px;color:var(--dim);font-family:monospace;}
-.gc-snaps{font-size:9px;color:var(--border2);}
-.gc-teams{font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.game-card{
+  padding:12px 14px;border-bottom:1px solid #1a2535;cursor:pointer;
+  transition:background .12s;border-left:3px solid transparent;
+}
+.game-card:hover{background:rgba(255,255,255,.03);}
+.game-card.sel{background:#0d1b2e;border-left-color:var(--blue);}
+.game-card.s-over{border-left-color:var(--orange);}
+.game-card.s-under{border-left-color:var(--cyan);}
+.game-card.s-ready{border-left-color:var(--accent);}
+
+.gc-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.gc-date{font-size:10px;color:var(--dim);font-family:monospace;}
+.gc-snaps{font-size:9px;color:#1e3a5f;}
+.gc-teams{font-size:13px;font-weight:800;color:var(--text);margin-bottom:6px;}
 .gc-teams .away{color:var(--muted);}
-.gc-meta{display:flex;justify-content:space-between;align-items:center;}
-.gc-total{font-size:15px;font-weight:900;font-family:monospace;color:var(--text);}
-.gc-delta{font-size:11px;font-weight:700;}
-.gc-delta.up{color:var(--orange);}
-.gc-delta.dn{color:var(--cyan);}
-.gc-delta.flat{color:var(--dim);}
-.gc-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.3px;}
-.badge-watch{background:rgba(75,85,99,.2);color:var(--dim);border:1px solid var(--dim);}
-.badge-ready{background:rgba(74,222,128,.15);color:var(--green);border:1px solid rgba(74,222,128,.4);animation:pulse-g 1.3s ease-in-out infinite;}
-.badge-moving{background:rgba(251,191,36,.15);color:var(--yellow);border:1px solid rgba(251,191,36,.4);}
-.badge-steam{background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.4);animation:steam 1.5s ease-in-out infinite;}
-.badge-steam-under{background:rgba(56,189,248,.15);color:var(--cyan);border:1px solid rgba(56,189,248,.4);animation:steam 1.5s ease-in-out infinite;}
-.badge-live{background:rgba(248,113,113,.15);color:var(--red);border:1px solid rgba(248,113,113,.4);}
+.gc-row3{display:flex;justify-content:space-between;align-items:center;}
+.gc-nums{display:flex;gap:10px;align-items:baseline;}
+.gc-total{font-size:14px;font-weight:900;font-family:monospace;color:var(--text);}
+.gc-delta{font-size:12px;font-weight:700;}
+.gc-win-delta{font-size:11px;font-weight:700;}
+.up{color:var(--orange);} .dn{color:var(--cyan);} .flat{color:var(--dim);}
 
-/* DETAIL PANEL */
-.detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--dim);gap:8px;}
-.detail-empty-icon{font-size:36px;opacity:.4;}
+/* entry button on card */
+.gc-btn{font-size:10px;font-weight:800;padding:4px 12px;border-radius:4px;border:none;cursor:pointer;font-family:inherit;letter-spacing:.3px;}
+.gc-btn-enter{background:#dc2626;color:#fff;animation:pulse-r 1.4s ease-in-out infinite;}
+.gc-btn-watch{background:#1e293b;color:var(--dim);cursor:default;}
 
-.detail-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
-.detail-title{font-size:18px;font-weight:800;color:var(--text);}
+/* ── RIGHT PANEL ── */
+.detail{flex:1;overflow-y:auto;padding:20px 24px;background:var(--bg);}
+.detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--dim);gap:8px;text-align:center;}
+
+.detail-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+.detail-title{font-size:20px;font-weight:900;color:var(--text);}
 .detail-sub{font-size:11px;color:var(--dim);margin-top:3px;}
-.btn-enter{background:var(--red);color:#fff;font-size:12px;padding:8px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:800;letter-spacing:.5px;font-family:inherit;animation:pulse-r 1.5s ease-in-out infinite;}
-.btn-enter.watch{background:var(--border);color:var(--dim);animation:none;cursor:default;}
+.btn-enter-big{background:#dc2626;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;animation:pulse-r 1.4s ease-in-out infinite;letter-spacing:.5px;}
+.btn-enter-big.watch{background:#1e293b;color:var(--dim);animation:none;cursor:default;}
 
-.chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;}
-.chart-title{font-size:10px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;}
-.chart-canvas{width:100% !important;height:220px !important;}
+/* chart */
+.chart-box{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:16px;}
+.chart-label{font-size:10px;color:var(--dim);letter-spacing:2px;margin-bottom:10px;}
+.chart-canvas{width:100%!important;height:240px!important;}
 
-.odds-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
+/* odds row */
+.odds-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
 .odds-cell{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center;}
-.odds-label{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
-.odds-value{font-size:16px;font-weight:800;font-family:monospace;}
+.odds-lbl{font-size:8px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
+.odds-val{font-size:16px;font-weight:900;font-family:monospace;}
 
-.snap-table{width:100%;border-collapse:collapse;font-size:11px;}
-.snap-table th{padding:5px 10px;text-align:left;color:var(--dim);font-size:9px;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:600;}
-.snap-table td{padding:6px 10px;border-bottom:1px solid rgba(30,58,95,.3);font-family:monospace;}
-.snap-table tr.newest td{background:rgba(59,130,246,.07);}
-.snap-wrap{background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
-.snap-wrap-title{padding:8px 12px;font-size:9px;color:var(--dim);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--surface);}
+/* snap table */
+.snap-box{background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.snap-head{padding:7px 12px;font-size:9px;color:var(--dim);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--surface);}
+.snap-tbl{width:100%;border-collapse:collapse;font-size:11px;}
+.snap-tbl th{padding:5px 10px;text-align:left;color:var(--dim);font-size:9px;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:600;}
+.snap-tbl td{padding:6px 10px;border-bottom:1px solid rgba(30,58,95,.25);font-family:monospace;}
+.snap-tbl tr.new td{background:rgba(59,130,246,.06);}
 
-/* PARLAY PANEL */
-.parlay-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;justify-content:center;align-items:center;padding:20px;}
-.parlay-overlay.open{display:flex;}
-.parlay-box{background:var(--surface);border:1px solid rgba(57,255,20,.3);border-radius:10px;width:100%;max-width:900px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;}
-.parlay-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
-.parlay-header h2{font-size:18px;font-weight:900;letter-spacing:2px;color:var(--accent);}
-.parlay-grid{padding:16px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;overflow-y:auto;}
-.parlay-card{background:var(--card);border:1px solid var(--border2);border-radius:8px;overflow:hidden;position:relative;}
-.parlay-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--blue));}
-.parlay-card-body{padding:14px;}
-.parlay-type{font-size:9px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;}
-.parlay-legs{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
-.parlay-leg{background:var(--bg);border-radius:4px;padding:8px 10px;border:1px solid var(--border);}
-.parlay-leg-game{font-size:11px;font-weight:700;color:var(--text);}
-.parlay-leg-pick{font-size:11px;font-weight:800;margin-top:2px;}
-.parlay-leg-conf{font-size:9px;color:var(--dim);margin-top:2px;}
-.conf-bar{height:3px;background:var(--border);border-radius:2px;margin-top:3px;overflow:hidden;}
-.conf-fill{height:100%;border-radius:2px;transition:width .6s ease;}
-.parlay-footer{display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid var(--border);padding:10px 0 0;}
-.parlay-odds{font-size:28px;font-weight:900;font-family:monospace;}
-.parlay-conf{font-size:36px;font-weight:900;font-family:monospace;text-align:center;}
-.parlay-conf-label{font-size:9px;color:var(--dim);text-align:center;}
-.risk-chip{font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;border:1px solid;}
-.risk-low{background:rgba(74,222,128,.15);color:var(--green);border-color:rgba(74,222,128,.3);}
-.risk-med{background:rgba(251,191,36,.15);color:var(--yellow);border-color:rgba(251,191,36,.3);}
-.risk-high{background:rgba(248,113,113,.15);color:var(--red);border-color:rgba(248,113,113,.3);}
-.parlay-note{font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5;}
+/* ── HISTORY VIEW ── */
+.hist-view{flex:1;overflow-y:auto;}
+.hist-head{padding:14px 20px;border-bottom:1px solid #1a2535;display:flex;justify-content:space-between;align-items:center;}
+.hist-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.hist-tbl th{padding:8px 14px;font-size:9px;color:var(--dim);letter-spacing:1px;border-bottom:2px solid var(--border);background:var(--surface);font-weight:600;}
+.hist-tbl td{padding:10px 14px;border-bottom:1px solid rgba(30,58,95,.25);}
+.hist-tbl tr:hover td{background:rgba(255,255,255,.02);}
+.rb{display:inline-block;padding:3px 9px;border-radius:4px;font-size:10px;font-weight:800;border:1px solid;}
+.rw{background:rgba(74,222,128,.12);color:#4ade80;border-color:rgba(74,222,128,.3);}
+.rl{background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.3);}
+.rp{background:rgba(251,191,36,.12);color:#fbbf24;border-color:rgba(251,191,36,.3);}
+.rn{background:rgba(75,85,99,.15);color:var(--dim);border-color:var(--dim);}
 
-/* HISTORY */
-.hist-wrap{padding:0;}
-.hist-header{padding:14px 20px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;}
-.hist-table{width:100%;border-collapse:collapse;font-size:12px;}
-.hist-table th{padding:8px 14px;text-align:left;font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;border-bottom:2px solid var(--border);background:var(--surface);font-weight:600;}
-.hist-table td{padding:10px 14px;border-bottom:1px solid rgba(30,58,95,.3);}
-.hist-table tr:hover td{background:rgba(255,255,255,.02);}
-.result-win{display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:800;background:rgba(74,222,128,.15);color:var(--green);border:1px solid rgba(74,222,128,.3);}
-.result-loss{display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:800;background:rgba(248,113,113,.15);color:var(--red);border:1px solid rgba(248,113,113,.3);}
-.result-push{display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:800;background:rgba(251,191,36,.15);color:var(--yellow);border:1px solid rgba(251,191,36,.3);}
-.result-none{display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(75,85,99,.2);color:var(--dim);border:1px solid var(--dim);}
+/* ── PARLAY MODAL ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;justify-content:center;align-items:center;padding:20px;}
+.modal-bg.open{display:flex;}
+.modal{background:var(--surface);border:1px solid rgba(57,255,20,.25);border-radius:10px;width:100%;max-width:880px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;}
+.modal-top{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+.modal-top h2{font-size:17px;font-weight:900;letter-spacing:2px;color:var(--accent);}
+.modal-body{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;overflow-y:auto;}
+.p-card{background:var(--card);border:1px solid #1e3a5f;border-radius:7px;overflow:hidden;position:relative;}
+.p-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),#3b82f6);}
+.p-body{padding:12px 14px;}
+.p-type{font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:8px;}
+.p-legs{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
+.p-leg{background:var(--bg);border-radius:4px;padding:7px 9px;border:1px solid var(--border);}
+.p-game{font-size:11px;font-weight:700;color:var(--text);}
+.p-pick{font-size:11px;font-weight:900;margin-top:2px;}
+.p-conf{font-size:9px;color:var(--dim);margin-top:2px;}
+.cbar{height:3px;background:var(--border);border-radius:2px;margin-top:3px;overflow:hidden;}
+.cfill{height:100%;border-radius:2px;}
+.p-foot{display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid var(--border);padding:8px 0 0;}
+.p-odds{font-size:26px;font-weight:900;font-family:monospace;}
+.p-score{font-size:34px;font-weight:900;font-family:monospace;text-align:center;}
+.p-slbl{font-size:8px;color:var(--dim);text-align:center;}
+.risk{font-size:9px;font-weight:700;padding:2px 8px;border-radius:3px;border:1px solid;}
+.risk-lo{background:rgba(74,222,128,.12);color:#4ade80;border-color:rgba(74,222,128,.3);}
+.risk-me{background:rgba(251,191,36,.12);color:#fbbf24;border-color:rgba(251,191,36,.3);}
+.risk-hi{background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.3);}
+.p-note{font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5;}
 
-/* ANIMATIONS */
-@keyframes spin    { from{transform:rotate(0)} to{transform:rotate(360deg)} }
-@keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:.3} }
-@keyframes pulse-g { 0%,100%{opacity:1} 50%{opacity:.4} }
-@keyframes pulse-r { 0%,100%{opacity:1} 50%{opacity:.6} }
-@keyframes steam   { 0%,100%{opacity:1} 50%{opacity:.5} }
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes pulse-r{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes pulse-g{0%,100%{opacity:1}50%{opacity:.35}}
 .spin{display:inline-block;animation:spin 1s linear infinite;}
 </style>
 </head>
 <body>
-<div class="layout">
 
-<!-- HEADER -->
-<div class="header">
+<!-- TOP BAR -->
+<div class="topbar">
   <div>
-    <div class="logo"><span class="logo-mlb">MLB</span><span class="logo-pin">ENTRY</span></div>
-    <div class="header-meta">
-      <span id="status-indicator"><span class="status-dot loading"></span>連線中...</span>
-      <span>ET <span id="et-clock" style="color:#3b82f6;font-family:monospace;font-weight:700">--:--:--</span></span>
-      <span>場次 <span id="games-count" style="color:#fff;font-weight:700">0</span></span>
-      <span>快照 <span id="snaps-count" style="color:#3b82f6;font-weight:700">0</span></span>
+    <div class="logo">MLB<span>ENTRY</span></div>
+    <div class="topbar-meta">
+      ET <span id="et-clock" style="color:#3b82f6;font-family:monospace;font-weight:700">--:--:--</span>
+      &nbsp;·&nbsp; 場次 <span id="gc" style="color:#fff;font-weight:700">0</span>
+      &nbsp;·&nbsp; 快照 <span id="sc" style="color:#3b82f6;font-weight:700">0</span>
+      &nbsp;·&nbsp; <span id="si" style="color:var(--dim)">連線中...</span>
     </div>
   </div>
-  <div class="header-right">
-    <div class="stat-group">
-      <div class="stat"><div class="stat-label">蒸汽</div><div class="stat-value" id="stat-steam" style="color:#f97316">0</div></div>
-      <div class="stat"><div class="stat-label">可進場</div><div class="stat-value" id="stat-ready" style="color:#39ff14;animation:pulse-g 1.4s ease-in-out infinite">0</div></div>
-      <div class="stat"><div class="stat-label">信號</div><div class="stat-value" id="stat-signals" style="color:#3b82f6">0</div></div>
-      <div class="stat"><div class="stat-label">勝率</div><div class="stat-value" id="stat-winrate" style="color:#a78bfa">—</div></div>
+  <div class="topbar-right">
+    <div class="stat-row">
+      <div class="stat"><div class="stat-lbl">蒸汽</div><div class="stat-val" id="ss" style="color:#f97316">0</div></div>
+      <div class="stat"><div class="stat-lbl">可進場</div><div class="stat-val" id="sr" style="color:#39ff14;animation:pulse-g 1.4s ease-in-out infinite">0</div></div>
+      <div class="stat"><div class="stat-lbl">信號</div><div class="stat-val" id="sg" style="color:#3b82f6">0</div></div>
+      <div class="stat"><div class="stat-lbl">勝率</div><div class="stat-val" id="sw" style="color:#a78bfa">—</div></div>
     </div>
-    <button class="btn btn-parlay" onclick="openParlay()">🎯 過關分析</button>
-    <button class="btn btn-refresh" id="refresh-btn" onclick="fetchData()">
-      <span id="refresh-icon">↺</span><span id="refresh-text">更新盤口</span>
+    <button class="btn btn-green" onclick="openParlay()">🎯 過關分析</button>
+    <button class="btn btn-blue" id="rbtn" onclick="fetchData()">
+      <span id="rico">↺</span><span id="rtxt">更新盤口</span>
     </button>
   </div>
 </div>
 
-<!-- TABS -->
-<div class="tabs-bar">
-  <button class="tab-btn active" id="tab-today" onclick="switchTab('today')">📡 今日盤口</button>
-  <button class="tab-btn" id="tab-history" onclick="switchTab('history')">📊 昨日結算</button>
+<!-- TAB BAR -->
+<div class="tabbar">
+  <button class="tab on" id="t1" onclick="switchTab('today')">📡 今日盤口</button>
+  <button class="tab" id="t2" onclick="switchTab('history')">📊 昨日結算</button>
 </div>
 
-<!-- MAIN: TODAY -->
-<div class="main-area" id="view-today">
-  <!-- SIDEBAR -->
-  <div class="sidebar" id="game-list">
-    <div style="padding:40px 20px;text-align:center;color:var(--dim);font-size:12px;">
-      <div class="spin" style="font-size:24px;margin-bottom:8px;">↺</div>
-      連線 Pinnacle...
-    </div>
+<!-- TODAY VIEW -->
+<div class="main" id="vt">
+  <div class="sidebar" id="glist">
+    <div class="sidebar-empty"><span class="spin" style="font-size:22px;display:block;margin-bottom:8px;">↺</span>連線 Pinnacle...</div>
   </div>
-
-  <!-- DETAIL -->
-  <div class="detail-panel" id="detail-panel">
+  <div class="detail" id="dpanel">
     <div class="detail-empty">
-      <div class="detail-empty-icon">📊</div>
+      <div style="font-size:40px;opacity:.25">📊</div>
       <div style="font-size:13px;color:var(--muted)">點擊左側場次查看詳細分析</div>
       <div style="font-size:11px;color:var(--dim);margin-top:4px">折線圖 · 快照歷史 · 進場建議</div>
     </div>
   </div>
 </div>
 
-<!-- MAIN: HISTORY -->
-<div class="main-area" id="view-history" style="display:none;grid-template-columns:1fr;">
-  <div class="hist-wrap">
-    <div class="hist-header">
+<!-- HISTORY VIEW -->
+<div class="main" id="vh" style="display:none;">
+  <div class="hist-view">
+    <div class="hist-head">
       <div>
-        <div style="font-size:15px;font-weight:800;color:var(--text)">昨日結算記錄</div>
-        <div style="font-size:11px;color:var(--dim);margin-top:2px">自動抓取賽果 · 每日覆蓋 · 修正盤口推演模型</div>
+        <div style="font-size:15px;font-weight:800;">昨日結算記錄</div>
+        <div style="font-size:11px;color:var(--dim);margin-top:2px;">自動抓取賽果 · 每日覆蓋更新 · 修正推演模型</div>
       </div>
-      <div id="hist-stats" style="font-size:12px;color:var(--muted);text-align:right;"></div>
+      <div id="hstat" style="font-size:12px;color:var(--muted);text-align:right;"></div>
     </div>
     <div style="overflow-x:auto;">
-      <table class="hist-table">
-        <thead>
-          <tr>
-            <th>比賽</th><th>開盤</th><th>收盤</th><th>移動</th>
-            <th>我們的推算</th><th>實際總分</th><th>結果</th><th>修正方向</th>
-          </tr>
-        </thead>
-        <tbody id="history-tbody">
-          <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">載入昨日結算...</td></tr>
-        </tbody>
+      <table class="hist-tbl">
+        <thead><tr>
+          <th>比賽</th><th>開盤</th><th>收盤</th><th>移動</th>
+          <th>推算方向</th><th>實際總分</th><th>結果</th><th>修正方向</th>
+        </tr></thead>
+        <tbody id="htbody"><tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">載入中...</td></tr></tbody>
       </table>
     </div>
   </div>
 </div>
 
-</div><!-- /layout -->
-
-<!-- PARLAY OVERLAY -->
-<div class="parlay-overlay" id="parlay-overlay" onclick="if(event.target===this)closeParlay()">
-  <div class="parlay-box">
-    <div class="parlay-header">
+<!-- PARLAY MODAL -->
+<div class="modal-bg" id="modal" onclick="if(event.target===this)closeParlay()">
+  <div class="modal">
+    <div class="modal-top">
       <h2>⚡ 過關建議</h2>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span style="font-size:10px;color:var(--dim)">基於 Pinnacle 破口 · MongoDB 快照</span>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span style="font-size:10px;color:var(--dim)">Pinnacle 破口 · 每 60 分鐘更新</span>
         <button onclick="closeParlay()" style="background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;font-weight:700;">✕</button>
       </div>
     </div>
-    <div class="parlay-grid" id="parlay-grid"></div>
-    <div style="padding:10px 20px;background:var(--bg);border-top:1px solid var(--border);font-size:10px;color:var(--dim);">
-      ⚠ 僅供參考。快照越多分析越準確。每 60 分鐘自動更新。
+    <div class="modal-body" id="pgrid"></div>
+    <div style="padding:8px 18px;background:var(--bg);border-top:1px solid var(--border);font-size:10px;color:var(--dim);">
+      ⚠ 僅供參考。快照越多越準確。
     </div>
   </div>
 </div>
 
 <script>
-const API = 'https://mlb-pinnacle-tracker.onrender.com';
-let allGames    = [];
-let selectedId  = null;
-let chartInst   = null;
-let currentTab  = 'today';
+const API='https://mlb-pinnacle-tracker.onrender.com';
+let games=[],selId=null,chartObj=null;
 
-// ── CLOCK ─────────────────────────────────────────────────────────────────────
-setInterval(() => {
-  document.getElementById('et-clock').textContent =
+// clock
+setInterval(()=>{
+  document.getElementById('et-clock').textContent=
     new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'America/New_York'});
-}, 1000);
+},1000);
 
-// ── HELPERS ───────────────────────────────────────────────────────────────────
-const fmtOdds = n => n==null ? '—' : n>0 ? '+'+n : ''+n;
-const minsUntil = iso => Math.round((new Date(iso)-Date.now())/60000);
-function fmtET(iso){
-  return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
-}
-function fmtMins(m){
-  if(m<=0) return '🔴 LIVE';
-  if(m>=60) return Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+'m';
-  return m+'m';
-}
+// helpers
+const fo=n=>n==null?'—':n>0?'+'+n:''+n;
+const mu=iso=>Math.round((new Date(iso)-Date.now())/60000);
+const fet=iso=>new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
+const fmins=m=>m<=0?'🔴 LIVE':m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+'m':m+'m';
 
-// ── SIGNAL ────────────────────────────────────────────────────────────────────
-function calcSig(snaps){
-  if(!snaps||snaps.length<2) return {label:'觀望',delta:0,steam:false,color:'#4b5563',pick:null,cardCls:''};
-  const d = +(snaps[snaps.length-1].total - snaps[0].total).toFixed(1);
-  if(d>=0.5)  return {label:'⚡ 大分蒸汽',delta:d,steam:true, color:'#f97316',pick:'OVER', cardCls:'steam-over'};
-  if(d<=-0.5) return {label:'⚡ 小分蒸汽',delta:d,steam:true, color:'#38bdf8',pick:'UNDER',cardCls:'steam-under'};
-  if(d>=0.25) return {label:'↑ 大分傾向',delta:d,steam:false,color:'#fb923c',pick:'OVER', cardCls:''};
-  if(d<=-0.25)return {label:'↓ 小分傾向',delta:d,steam:false,color:'#7dd3fc',pick:'UNDER',cardCls:''};
-  return {label:'觀望',delta:d,steam:false,color:'#4b5563',pick:null,cardCls:''};
+function sig(snaps){
+  if(!snaps||snaps.length<2)return{lbl:'觀望',d:0,steam:false,col:'#4b5563',pick:null,cls:''};
+  const d=+(snaps[snaps.length-1].total-snaps[0].total).toFixed(1);
+  if(d>=0.5) return{lbl:'⚡ 大分蒸汽',d,steam:true,col:'#f97316',pick:'OVER', cls:'s-over'};
+  if(d<=-0.5)return{lbl:'⚡ 小分蒸汽',d,steam:true,col:'#38bdf8',pick:'UNDER',cls:'s-under'};
+  if(d>=0.25)return{lbl:'↑ 大分傾向',d,steam:false,col:'#fb923c',pick:'OVER', cls:''};
+  if(d<=-0.25)return{lbl:'↓ 小分傾向',d,steam:false,col:'#7dd3fc',pick:'UNDER',cls:''};
+  return{lbl:'觀望',d,steam:false,col:'#4b5563',pick:null,cls:''};
 }
-
-function calcEntry(snaps,mins){
-  if(mins<=0)  return {label:'進行中',  badgeCls:'badge-live'};
-  if(mins<20)  return {label:'已過期',  badgeCls:'badge-watch'};
-  const sig = calcSig(snaps);
-  if(!sig.pick) return {label:'觀望',   badgeCls:'badge-watch'};
+function ent(snaps,mins){
+  if(mins<=0)  return{lbl:'進行中',  btnCls:'gc-btn-watch',isReady:false};
+  if(mins<20)  return{lbl:'已過期',  btnCls:'gc-btn-watch',isReady:false};
+  const s=sig(snaps);
+  if(!s.pick)  return{lbl:'觀望',    btnCls:'gc-btn-watch',isReady:false};
   if(snaps.length>=2){
-    const r = Math.abs(snaps[snaps.length-1].total - snaps[snaps.length-2].total);
-    if(r>=0.1) return {label:'等待停滯',badgeCls:'badge-moving'};
+    const r=Math.abs(snaps[snaps.length-1].total-snaps[snaps.length-2].total);
+    if(r>=0.1) return{lbl:'等待停滯',btnCls:'gc-btn-watch',isReady:false};
   }
-  return {label:'✓ 建議進場',badgeCls:sig.steam?'badge-steam':'badge-ready',isReady:true};
+  return{lbl:'進場',btnCls:'gc-btn-enter',isReady:true};
 }
 
-// ── FETCH ─────────────────────────────────────────────────────────────────────
 async function fetchData(){
-  const btn  = document.getElementById('refresh-btn');
-  const icon = document.getElementById('refresh-icon');
-  const txt  = document.getElementById('refresh-text');
-  const si   = document.getElementById('status-indicator');
-  btn.disabled=true; icon.classList.add('spin'); txt.textContent='更新中...';
-
+  const btn=document.getElementById('rbtn');
+  const ico=document.getElementById('rico');
+  const txt=document.getElementById('rtxt');
+  btn.disabled=true; ico.classList.add('spin'); txt.textContent='更新中...';
   try{
-    const res = await fetch(API+'/games');
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    allGames = await res.json();
-    allGames.sort((a,b)=>new Date(a.commence_time)-new Date(b.commence_time));
-
-    si.innerHTML = '<span class="status-dot ok"></span>已連線 Pinnacle';
-    document.getElementById('games-count').textContent = allGames.length;
-    document.getElementById('snaps-count').textContent = allGames.reduce((s,g)=>s+(g.snapshot_count||0),0);
-
-    renderSidebar();
-    if(selectedId){
-      const g = allGames.find(g=>g.game_id===selectedId);
-      if(g) renderDetail(g);
-    }
-    updateStats();
+    const r=await fetch(API+'/games');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    games=await r.json();
+    games.sort((a,b)=>new Date(a.commence_time)-new Date(b.commence_time));
+    document.getElementById('si').innerHTML='<span style="color:#39ff14">● 已連線</span>';
+    document.getElementById('gc').textContent=games.length;
+    document.getElementById('sc').textContent=games.reduce((s,g)=>s+(g.snapshot_count||0),0);
+    renderList();
+    if(selId){const g=games.find(g=>g.game_id===selId);if(g)renderDetail(g);}
+    calcStats();
     fetchStats();
-  } catch(e){
-    si.innerHTML = '<span class="status-dot err"></span>連線失敗：'+e.message;
-    document.getElementById('game-list').innerHTML =
-      `<div style="padding:30px 20px;text-align:center;color:#f87171;font-size:12px;">
-        連線失敗：${e.message}<br>
-        <a href="${API}" target="_blank" style="color:#3b82f6;font-size:10px;margin-top:6px;display:block;">喚醒後端 →</a>
-       </div>`;
-  } finally{
-    btn.disabled=false; icon.classList.remove('spin'); txt.textContent='更新盤口';
-  }
+  }catch(e){
+    document.getElementById('si').innerHTML='<span style="color:#f87171">✕ '+e.message+'</span>';
+    document.getElementById('glist').innerHTML=
+      `<div class="sidebar-empty" style="color:#f87171;">連線失敗<br><a href="${API}" target="_blank" style="color:#3b82f6;font-size:10px;">喚醒後端</a></div>`;
+  }finally{btn.disabled=false;ico.classList.remove('spin');txt.textContent='更新盤口';}
 }
 
-// ── SIDEBAR ───────────────────────────────────────────────────────────────────
-function updateStats(){
-  let steam=0,ready=0,sig=0;
-  allGames.forEach(g=>{
+function calcStats(){
+  let st=0,rd=0,sg=0;
+  games.forEach(g=>{
     const snaps=(g.history||[]).filter(s=>s.total!=null);
-    const s=calcSig(snaps); const e=calcEntry(snaps,minsUntil(g.commence_time));
-    if(s.steam) steam++;
-    if(s.pick)  sig++;
-    if(e.isReady) ready++;
+    const s=sig(snaps),e=ent(snaps,mu(g.commence_time));
+    if(s.steam)st++; if(s.pick)sg++; if(e.isReady)rd++;
   });
-  document.getElementById('stat-steam').textContent=steam;
-  document.getElementById('stat-ready').textContent=ready;
-  document.getElementById('stat-signals').textContent=sig;
+  document.getElementById('ss').textContent=st;
+  document.getElementById('sr').textContent=rd;
+  document.getElementById('sg').textContent=sg;
 }
 
-function renderSidebar(){
-  const list = document.getElementById('game-list');
-  if(!allGames.length){
-    list.innerHTML='<div style="padding:40px 20px;text-align:center;color:var(--dim);font-size:12px;">目前無盤口數據</div>';
-    return;
-  }
-  list.innerHTML = allGames.map(g=>{
+function renderList(){
+  const el=document.getElementById('glist');
+  if(!games.length){el.innerHTML='<div class="sidebar-empty">目前無盤口數據</div>';return;}
+  el.innerHTML=games.map(g=>{
     const snaps=(g.history||[]).filter(s=>s.total!=null);
-    const mins=minsUntil(g.commence_time);
-    const sig=calcSig(snaps);
-    const entry=calcEntry(snaps,mins);
+    const mins=mu(g.commence_time);
+    const s=sig(snaps),e=ent(snaps,mins);
     const cur=snaps.length?snaps[snaps.length-1].total:g.latest?.total;
-    const delta=sig.delta;
-    const deltaCls=delta>0?'up':delta<0?'dn':'flat';
-    const deltaStr=delta===0?'─':delta>0?`+${delta}`:`${delta}`;
+    const mlDelta=snaps.length>=2?(snaps[snaps.length-1].ml_home||0)-(snaps[0].ml_home||0):0;
+    const dd=s.d;
+    const dc=dd>0?'up':dd<0?'dn':'flat';
+    const ds=dd===0?'0':dd>0?'+'+dd:''+dd;
+    const mdc=mlDelta>0?'up':mlDelta<0?'dn':'flat';
+    const mds=mlDelta===0?'0':mlDelta>0?'+'+mlDelta:''+mlDelta;
     const home=(g.home||'').split(' ').pop();
     const away=(g.away||'').split(' ').pop();
-    const isActive=selectedId===g.game_id;
-    let cls='game-card';
-    if(isActive) cls+=' active';
-    if(sig.steam&&sig.pick==='OVER')  cls+=' steam-over';
-    if(sig.steam&&sig.pick==='UNDER') cls+=' steam-under';
-    if(entry.isReady&&!sig.steam)     cls+=' signal-ready';
-
+    // date portion
+    const dt=new Date(g.commence_time);
+    const dateStr=(dt.getMonth()+1).toString().padStart(2,'0')+'/'+(dt.getDate()).toString().padStart(2,'0');
+    const timeStr=fet(g.commence_time);
+    let cls='game-card'+( selId===g.game_id?' sel':'' )+( s.cls?' '+s.cls:'' )+(e.isReady&&!s.steam?' s-ready':'');
     return `<div class="${cls}" onclick="selectGame('${g.game_id}')">
-      <div class="gc-header">
-        <span class="gc-time">${fmtET(g.commence_time)} · ${fmtMins(mins)}</span>
-        <span class="gc-snaps">📸 ${g.snapshot_count||0}</span>
+      <div class="gc-row1">
+        <span class="gc-date">${dateStr} ${timeStr} 📸:${g.snapshot_count||0}</span>
       </div>
       <div class="gc-teams"><span class="away">${away}</span> VS ${home}</div>
-      <div class="gc-meta">
-        <div style="display:flex;align-items:baseline;gap:6px;">
+      <div class="gc-row3">
+        <div class="gc-nums">
           <span class="gc-total">${cur??'—'}</span>
-          <span class="gc-delta ${deltaCls}">${deltaStr}</span>
+          <span class="gc-delta ${dc}">大小: ${ds}</span>
+          <span class="gc-win-delta ${mdc}">獨贏: ${mds}</span>
         </div>
-        <div style="display:flex;gap:5px;align-items:center;">
-          <span style="font-size:10px;color:var(--dim)">獨贏: <span style="color:${delta>0?'#f97316':delta<0?'#38bdf8':'#6b7280'};font-weight:700">${delta>0?'+':''+''}${Math.round((g.delta?.ml||0))}</span></span>
-          <span class="gc-badge ${entry.badgeCls}">${entry.label}</span>
-        </div>
+        <button class="gc-btn ${e.btnCls}" onclick="event.stopPropagation();selectGame('${g.game_id}')">
+          ${e.isReady?'🔥 進場':'🚀 觀望'}
+        </button>
       </div>
     </div>`;
   }).join('');
 }
 
-// ── SELECT GAME ───────────────────────────────────────────────────────────────
 function selectGame(id){
-  selectedId=id;
-  const g=allGames.find(g=>g.game_id===id);
-  if(g) renderDetail(g);
-  renderSidebar(); // re-highlight active
+  selId=id;
+  renderList();
+  const g=games.find(g=>g.game_id===id);
+  if(g)renderDetail(g);
 }
 
-// ── DETAIL ────────────────────────────────────────────────────────────────────
 function renderDetail(g){
-  const panel=document.getElementById('detail-panel');
+  const panel=document.getElementById('dpanel');
   const snaps=(g.history||[]).filter(s=>s.total!=null);
-  const mins=minsUntil(g.commence_time);
-  const sig=calcSig(snaps);
-  const entry=calcEntry(snaps,mins);
-  const home=(g.home||'');
-  const away=(g.away||'');
-  const cur=snaps.length?snaps[snaps.length-1].total:g.latest?.total;
-  const open=snaps.length?snaps[0].total:g.open?.total;
+  const mins=mu(g.commence_time);
+  const s=sig(snaps),e=ent(snaps,mins);
   const lat=g.latest||{};
+  const cur=snaps.length?snaps[snaps.length-1].total:lat.total;
+  const open=snaps.length?snaps[0].total:g.open?.total;
+  const home=g.home||'',away=g.away||'';
 
-  const enterBtn = entry.isReady
-    ? `<button class="btn-enter" onclick="alert('進場方向：${sig.label} ${cur}\\n建議等移動停滯後確認')">🔥 建議進場</button>`
-    : `<button class="btn-enter watch" disabled>${entry.label}</button>`;
-
-  panel.innerHTML = `
-    <div class="detail-header">
+  panel.innerHTML=`
+    <div class="detail-head">
       <div>
         <div class="detail-title">${away.split(' ').pop()} VS ${home.split(' ').pop()}</div>
-        <div class="detail-sub">${fmtET(g.commence_time)} ET · ${fmtMins(mins)} · ${g.snapshot_count||0} 快照</div>
-        <div style="margin-top:6px;display:flex;gap:6px;">
-          <span class="gc-badge ${entry.badgeCls}">${entry.label}</span>
-          <span style="font-size:11px;font-weight:700;color:${sig.color}">${sig.label}</span>
-        </div>
+        <div class="detail-sub">${fet(g.commence_time)} ET · ${fmins(mins)} · ${g.snapshot_count||0} 快照 · <span style="color:${s.col}">${s.lbl}</span></div>
       </div>
-      ${enterBtn}
+      <button class="btn-enter-big${e.isReady?'':' watch'}"
+        onclick="${e.isReady?`alert('進場方向：${s.lbl}\\n大小分：${cur}\\n建議確認移動停滯後進場')`:''}"
+      >🔥 ${e.isReady?'建議進場':e.lbl}</button>
     </div>
 
-    <!-- CHART -->
-    <div class="chart-wrap">
-      <div class="chart-title">盤口移動走勢 · Pinnacle</div>
-      <canvas id="lineChart" class="chart-canvas"></canvas>
+    <div class="chart-box">
+      <div class="chart-label">盤口移動走勢 · Pinnacle 快照</div>
+      <canvas id="lc" class="chart-canvas"></canvas>
     </div>
 
-    <!-- ODDS GRID -->
-    <div class="odds-grid">
-      <div class="odds-cell">
-        <div class="odds-label">開盤</div>
-        <div class="odds-value" style="color:#8b949e">${open??'—'}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">現盤</div>
-        <div class="odds-value" style="color:#e6edf3">${cur??'—'}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">Over</div>
-        <div class="odds-value" style="color:#f97316">${fmtOdds(lat.over_juice)}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">Under</div>
-        <div class="odds-value" style="color:#38bdf8">${fmtOdds(lat.under_juice)}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">主隊 ML</div>
-        <div class="odds-value" style="color:#e6edf3">${fmtOdds(lat.ml_home)}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">客隊 ML</div>
-        <div class="odds-value" style="color:#8b949e">${fmtOdds(lat.ml_away)}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">移動幅度</div>
-        <div class="odds-value" style="color:${sig.delta>0?'#f97316':sig.delta<0?'#38bdf8':'#4b5563'}">${sig.delta>0?'+':''}${sig.delta}</div>
-      </div>
-      <div class="odds-cell">
-        <div class="odds-label">讓分</div>
-        <div class="odds-value" style="color:#8b949e">${fmtOdds(lat.spread_home)}</div>
-      </div>
+    <div class="odds-row">
+      <div class="odds-cell"><div class="odds-lbl">開盤</div><div class="odds-val" style="color:#8b949e">${open??'—'}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">現盤</div><div class="odds-val" style="color:#e6edf3">${cur??'—'}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">Over</div><div class="odds-val" style="color:#f97316">${fo(lat.over_juice)}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">Under</div><div class="odds-val" style="color:#38bdf8">${fo(lat.under_juice)}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">主隊 ML</div><div class="odds-val" style="color:#e6edf3">${fo(lat.ml_home)}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">客隊 ML</div><div class="odds-val" style="color:#8b949e">${fo(lat.ml_away)}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">移動幅度</div><div class="odds-val" style="color:${s.d>0?'#f97316':s.d<0?'#38bdf8':'#4b5563'}">${s.d>0?'+':''}${s.d}</div></div>
+      <div class="odds-cell"><div class="odds-lbl">讓分</div><div class="odds-val" style="color:#8b949e">${fo(lat.spread_home)}</div></div>
     </div>
 
-    <!-- SNAP TABLE -->
-    ${snaps.length>0 ? `
-    <div class="snap-wrap">
-      <div class="snap-wrap-title">快照歷史 · ${snaps.length} 筆記錄</div>
-      <table class="snap-table">
+    ${snaps.length>0?`
+    <div class="snap-box">
+      <div class="snap-head">快照歷史 · ${snaps.length} 筆</div>
+      <table class="snap-tbl">
         <thead><tr><th>#</th><th>大小分</th><th>移動</th><th>Over</th><th>Under</th><th>主ML</th><th>客ML</th></tr></thead>
-        <tbody>
-          ${[...snaps].reverse().map((s,i)=>{
-            const prev=snaps[snaps.length-2-i];
-            const d=s.total&&prev?.total?+(s.total-prev.total).toFixed(1):null;
-            const dc=d==null?'#4b5563':d>0?'#f97316':d<0?'#38bdf8':'#4b5563';
-            return `<tr class="${i===0?'newest':''}">
-              <td style="color:#4b5563">${snaps.length-i}</td>
-              <td style="font-weight:${i===0?800:400};color:${i===0?'#e6edf3':'#8b949e'}">${s.total??'—'}</td>
-              <td style="color:${dc};font-weight:700">${d==null?'—':d===0?'─':d>0?`▲+${d}`:`▼${d}`}</td>
-              <td style="color:#f97316">${fmtOdds(s.over_juice)}</td>
-              <td style="color:#38bdf8">${fmtOdds(s.under_juice)}</td>
-              <td style="color:#8b949e">${fmtOdds(s.ml_home)}</td>
-              <td style="color:#8b949e">${fmtOdds(s.ml_away)}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
+        <tbody>${[...snaps].reverse().map((s2,i)=>{
+          const prev=snaps[snaps.length-2-i];
+          const d=s2.total&&prev?.total?+(s2.total-prev.total).toFixed(1):null;
+          const dc=d==null?'#4b5563':d>0?'#f97316':d<0?'#38bdf8':'#4b5563';
+          return `<tr class="${i===0?'new':''}">
+            <td style="color:#4b5563">${snaps.length-i}</td>
+            <td style="font-weight:${i===0?800:400};color:${i===0?'#e6edf3':'#8b949e'}">${s2.total??'—'}</td>
+            <td style="color:${dc};font-weight:700">${d==null?'—':d===0?'─':d>0?`▲+${d}`:`▼${d}`}</td>
+            <td style="color:#f97316">${fo(s2.over_juice)}</td>
+            <td style="color:#38bdf8">${fo(s2.under_juice)}</td>
+            <td style="color:#8b949e">${fo(s2.ml_home)}</td>
+            <td style="color:#8b949e">${fo(s2.ml_away)}</td>
+          </tr>`;
+        }).join('')}</tbody>
       </table>
-    </div>` : '<div style="text-align:center;padding:20px;color:var(--dim);font-size:11px;">快照累積中，60 分鐘後更新</div>'}
+    </div>`:'<div style="text-align:center;padding:20px;color:var(--dim);font-size:11px;">快照累積中，60 分鐘後更新</div>'}
   `;
 
-  // Draw chart
-  drawChart(g, snaps);
-}
-
-// ── CHART ─────────────────────────────────────────────────────────────────────
-function drawChart(g, snaps){
-  if(chartInst){ chartInst.destroy(); chartInst=null; }
-  const canvas = document.getElementById('lineChart');
-  if(!canvas) return;
-
-  const labels = snaps.map((_,i) => {
-    const d = new Date(_.ts);
+  // draw chart
+  if(chartObj){chartObj.destroy();chartObj=null;}
+  const canvas=document.getElementById('lc');
+  if(!canvas||!snaps.length)return;
+  const labels=snaps.map(s2=>{
+    const d=new Date(s2.ts);
     return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
   });
-  const totalData = snaps.map(s=>s.total);
-  const mlData    = snaps.map(s=>s.ml_home);
-
-  chartInst = new Chart(canvas, {
-    data: {
+  chartObj=new Chart(canvas,{
+    data:{
       labels,
-      datasets: [
-        {
-          type: 'line',
-          label: '大小分',
-          data: totalData,
-          borderColor: '#38bdf8',
-          backgroundColor: 'rgba(56,189,248,.08)',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointBackgroundColor: '#38bdf8',
-          tension: 0.3,
-          fill: true,
-          yAxisID: 'y',
-        },
-        {
-          type: 'line',
-          label: '主獨贏',
-          data: mlData,
-          borderColor: '#fbbf24',
-          backgroundColor: 'transparent',
-          borderWidth: 1.5,
-          borderDash: [5,3],
-          pointRadius: 2,
-          pointBackgroundColor: '#fbbf24',
-          tension: 0.3,
-          fill: false,
-          yAxisID: 'y2',
-        }
+      datasets:[
+        {type:'line',label:'大小分',data:snaps.map(s2=>s2.total),
+         borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.07)',
+         borderWidth:2,pointRadius:4,pointBackgroundColor:'#38bdf8',
+         tension:.25,fill:true,yAxisID:'y'},
+        {type:'line',label:'主獨贏',data:snaps.map(s2=>s2.ml_home),
+         borderColor:'#fbbf24',backgroundColor:'transparent',
+         borderWidth:1.5,borderDash:[6,3],pointRadius:3,pointBackgroundColor:'#fbbf24',
+         tension:.3,fill:false,yAxisID:'y2'},
       ]
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          labels: {
-            color: '#8b949e',
-            font: { size: 10 },
-            usePointStyle: true,
-            pointStyleWidth: 16,
-          }
-        },
-        tooltip: {
-          backgroundColor: '#0f1e35',
-          borderColor: '#1e3a5f',
-          borderWidth: 1,
-          titleColor: '#8b949e',
-          bodyColor: '#e6edf3',
-          padding: 10,
-        }
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{color:'#8b949e',font:{size:10},usePointStyle:true,pointStyleWidth:18}},
+        tooltip:{backgroundColor:'#0d1b2e',borderColor:'#1e3a5f',borderWidth:1,
+                 titleColor:'#8b949e',bodyColor:'#e6edf3',padding:10}
       },
-      scales: {
-        x: {
-          ticks: { color:'#4b5563', font:{size:9}, maxTicksLimit:8 },
-          grid:  { color:'rgba(30,58,95,.3)' },
-        },
-        y: {
-          position: 'left',
-          ticks: { color:'#38bdf8', font:{size:10} },
-          grid:  { color:'rgba(30,58,95,.3)' },
-          title: { display:true, text:'大小分', color:'#38bdf8', font:{size:9} },
-        },
-        y2: {
-          position: 'right',
-          ticks: { color:'#fbbf24', font:{size:10} },
-          grid:  { drawOnChartArea:false },
-          title: { display:true, text:'主獨贏', color:'#fbbf24', font:{size:9} },
-        }
+      scales:{
+        x:{ticks:{color:'#4b5563',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(30,58,95,.25)'}},
+        y:{position:'left',ticks:{color:'#38bdf8',font:{size:10}},grid:{color:'rgba(30,58,95,.25)'},
+           title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}}},
+        y2:{position:'right',ticks:{color:'#fbbf24',font:{size:10}},grid:{drawOnChartArea:false},
+            title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}}}
       }
     }
   });
 }
 
-// ── TAB ───────────────────────────────────────────────────────────────────────
-function switchTab(tab){
-  currentTab=tab;
-  document.getElementById('view-today').style.display   = tab==='today'   ? 'grid' : 'none';
-  document.getElementById('view-history').style.display = tab==='history' ? 'grid' : 'none';
-  document.getElementById('tab-today').classList.toggle('active',   tab==='today');
-  document.getElementById('tab-history').classList.toggle('active', tab==='history');
-  if(tab==='history') fetchHistory();
+function switchTab(t){
+  document.getElementById('vt').style.display=t==='today'?'flex':'none';
+  document.getElementById('vh').style.display=t==='history'?'flex':'none';
+  document.getElementById('t1').classList.toggle('on',t==='today');
+  document.getElementById('t2').classList.toggle('on',t==='history');
+  if(t==='history')fetchHistory();
 }
 
-// ── HISTORY ───────────────────────────────────────────────────────────────────
 async function fetchHistory(){
-  const tbody=document.getElementById('history-tbody');
-  tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--dim)">載入中...</td></tr>';
+  const tb=document.getElementById('htbody');
+  tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--dim)">載入中...</td></tr>';
   try{
-    const res=await fetch(API+'/history');
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    const data=await res.json();
-    renderHistory(data);
-  } catch(e){
-    tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:30px;color:#f87171">載入失敗：${e.message}</td></tr>`;
+    const r=await fetch(API+'/history');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    renderHistory(await r.json());
+  }catch(e){
+    tb.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:30px;color:#f87171">載入失敗：${e.message}</td></tr>`;
   }
 }
-
 function renderHistory(data){
-  const tbody=document.getElementById('history-tbody');
-  if(!data.length){
-    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">昨日尚無結算記錄</td></tr>';
-    return;
-  }
-  let wins=0,losses=0,pushes=0;
-  tbody.innerHTML=data.map(g=>{
+  const tb=document.getElementById('htbody');
+  if(!data.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">昨日尚無結算記錄</td></tr>';return;}
+  let w=0,l=0,p=0;
+  tb.innerHTML=data.map(g=>{
     const d=g.total_delta||0;
-    const dStr=d===0?'─':d>0?`<span style="color:#f97316">▲+${d}</span>`:`<span style="color:#38bdf8">▼${d}</span>`;
-    let resBadge='<span class="result-none">未結算</span>';
-    if(g.result==='WIN')  { resBadge='<span class="result-win">✓ 過盤</span>';  wins++;   }
-    if(g.result==='LOSS') { resBadge='<span class="result-loss">✗ 未過</span>'; losses++; }
-    if(g.result==='PUSH') { resBadge='<span class="result-push">~ Push</span>'; pushes++; }
-    let corr='─';
-    if(g.result==='LOSS'&&g.pick){
-      corr=g.pick.includes('OVER')
-        ?'<span style="color:#38bdf8">↓ 盤口偏高，下次考慮小分</span>'
-        :'<span style="color:#f97316">↑ 盤口偏低，下次考慮大分</span>';
-    } else if(g.result==='WIN'){
-      corr='<span style="color:#4ade80">✓ 方向正確</span>';
-    }
+    const ds=d===0?'─':d>0?`<span class="up">▲+${d}</span>`:`<span class="dn">▼${d}</span>`;
+    let rb='<span class="rb rn">未結算</span>';
+    if(g.result==='WIN'){rb='<span class="rb rw">✓ 過盤</span>';w++;}
+    if(g.result==='LOSS'){rb='<span class="rb rl">✗ 未過</span>';l++;}
+    if(g.result==='PUSH'){rb='<span class="rb rp">~ Push</span>';p++;}
+    let co='─';
+    if(g.result==='LOSS'&&g.pick)
+      co=g.pick.includes('OVER')?'<span class="dn">↓ 下次考慮小分</span>':'<span class="up">↑ 下次考慮大分</span>';
+    else if(g.result==='WIN') co='<span style="color:#4ade80">✓ 方向正確</span>';
     return `<tr>
-      <td><div style="font-weight:700;color:var(--text);font-size:12px;">${g.away?.split(' ').pop()||'—'} @ ${g.home?.split(' ').pop()||'—'}</div>
-          <div style="font-size:10px;color:var(--dim);margin-top:1px">${fmtET(g.commence_time)}</div></td>
+      <td><div style="font-weight:700;font-size:12px">${(g.away||'').split(' ').pop()} @ ${(g.home||'').split(' ').pop()}</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:1px">${fet(g.commence_time)}</div></td>
       <td style="font-family:monospace;color:#8b949e">${g.open_total??'—'}</td>
-      <td style="font-family:monospace;font-weight:700;color:var(--text)">${g.close_total??'—'}</td>
-      <td>${dStr}</td>
+      <td style="font-family:monospace;font-weight:700">${g.close_total??'—'}</td>
+      <td>${ds}</td>
       <td style="font-weight:700;color:${g.pick?.includes('OVER')?'#f97316':'#38bdf8'}">${g.pick||'<span style="color:var(--dim)">觀望</span>'}</td>
-      <td style="font-family:monospace;font-size:16px;font-weight:900;color:var(--text)">${g.actual_total??'—'}</td>
-      <td>${resBadge}</td>
-      <td style="font-size:11px">${corr}</td>
+      <td style="font-family:monospace;font-size:17px;font-weight:900">${g.actual_total??'—'}</td>
+      <td>${rb}</td>
+      <td style="font-size:11px">${co}</td>
     </tr>`;
   }).join('');
-  const total=wins+losses;
-  const wr=total>0?Math.round(wins/total*100):0;
-  document.getElementById('hist-stats').innerHTML=
-    `<div style="font-weight:800;color:var(--text)">${wins}勝 ${losses}敗 ${pushes}平</div>
+  const tot=w+l;
+  const wr=tot>0?Math.round(w/tot*100):0;
+  document.getElementById('hstat').innerHTML=
+    `<div style="font-weight:800">${w}勝 ${l}敗 ${p}平</div>
      <div style="color:${wr>=55?'#4ade80':wr>=45?'#fbbf24':'#f87171'};font-weight:800">勝率 ${wr}%</div>`;
 }
 
-// ── STATS ─────────────────────────────────────────────────────────────────────
 async function fetchStats(){
   try{
-    const res=await fetch(API+'/stats');
-    if(!res.ok) return;
-    const s=await res.json();
-    document.getElementById('stat-winrate').textContent=s.total>0?s.win_rate+'%':'—';
-  } catch(_){}
+    const r=await fetch(API+'/stats');if(!r.ok)return;
+    const s=await r.json();
+    document.getElementById('sw').textContent=s.total>0?s.win_rate+'%':'—';
+  }catch(_){}
 }
 
-// ── PARLAY ────────────────────────────────────────────────────────────────────
-function openParlay(){
-  document.getElementById('parlay-overlay').classList.add('open');
-  buildParlay();
-}
-function closeParlay(){
-  document.getElementById('parlay-overlay').classList.remove('open');
-}
-
-function scoreGame(g){
-  const snaps=(g.history||[]).filter(s=>s.total!=null);
-  const mins=minsUntil(g.commence_time);
-  const sig=calcSig(snaps);
-  const entry=calcEntry(snaps,mins);
-  let score=0;
-  if(Math.abs(sig.delta)>=0.5)   score+=40;
-  else if(Math.abs(sig.delta)>=0.25) score+=20;
-  if(entry.label==='✓ 建議進場') score+=25;
-  else if(entry.label==='等待停滯') score+=10;
-  const sc=g.snapshot_count||0;
-  if(sc>=5) score+=15; else if(sc>=3) score+=10; else if(sc>=2) score+=5;
-  if(mins>=120&&mins<=480) score+=10;
-  const oj=g.latest?.over_juice, uj=g.latest?.under_juice;
-  if(oj&&uj&&Math.abs(oj)<=115&&Math.abs(uj)<=115) score+=10;
-  let pick=null,pickLabel='觀望',pickColor='#4b5563';
-  if(sig.delta>=0.5)        {pick='OVER'; pickLabel='大分 OVER '+g.latest?.total;  pickColor='#f97316';}
-  else if(sig.delta<=-0.5)  {pick='UNDER';pickLabel='小分 UNDER '+g.latest?.total; pickColor='#38bdf8';}
-  else if(sig.delta>=0.25)  {pick='OVER'; pickLabel='大分傾向 '+g.latest?.total;   pickColor='#fb923c';}
-  else if(sig.delta<=-0.25) {pick='UNDER';pickLabel='小分傾向 '+g.latest?.total;   pickColor='#7dd3fc';}
-  return {game:g,score,pick,pickLabel,pickColor,sig,snaps};
-}
-
-function toDecimal(odds){
-  if(!odds) return 1.91;
-  return odds>0 ? +(1+odds/100).toFixed(3) : +(1+100/Math.abs(odds)).toFixed(3);
-}
+function openParlay(){document.getElementById('modal').classList.add('open');buildParlay();}
+function closeParlay(){document.getElementById('modal').classList.remove('open');}
+const td2=o=>o==null?1.91:o>0?+(1+o/100).toFixed(3):+(1+100/Math.abs(o)).toFixed(3);
 
 function buildParlay(){
-  const grid=document.getElementById('parlay-grid');
-  const valid=allGames.map(scoreGame).filter(s=>s.score>=50&&s.pick).sort((a,b)=>b.score-a.score);
-  if(!valid.length){
-    grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--dim);font-size:12px;">快照不足，無法產生建議<br><span style="font-size:10px;color:#1e3a5f">每 60 分鐘自動更新快照，稍後再試</span></div>';
+  const pg=document.getElementById('pgrid');
+  const scored=games.map(g=>{
+    const snaps=(g.history||[]).filter(s=>s.total!=null);
+    const mins=mu(g.commence_time);
+    const s=sig(snaps),e=ent(snaps,mins);
+    let sc=0;
+    if(Math.abs(s.d)>=0.5)sc+=40;else if(Math.abs(s.d)>=0.25)sc+=20;
+    if(e.isReady)sc+=25;else if(e.lbl==='等待停滯')sc+=10;
+    const sn=g.snapshot_count||0;
+    if(sn>=5)sc+=15;else if(sn>=3)sc+=10;else if(sn>=2)sc+=5;
+    if(mins>=120&&mins<=480)sc+=10;
+    const oj=g.latest?.over_juice,uj=g.latest?.under_juice;
+    if(oj&&uj&&Math.abs(oj)<=115&&Math.abs(uj)<=115)sc+=10;
+    let pick=null,pl='觀望',pc='#4b5563';
+    if(s.d>=0.5){pick='OVER';pl='大分 OVER '+g.latest?.total;pc='#f97316';}
+    else if(s.d<=-0.5){pick='UNDER';pl='小分 UNDER '+g.latest?.total;pc='#38bdf8';}
+    else if(s.d>=0.25){pick='OVER';pl='大分傾向 '+g.latest?.total;pc='#fb923c';}
+    else if(s.d<=-0.25){pick='UNDER';pl='小分傾向 '+g.latest?.total;pc='#7dd3fc';}
+    return{g,sc,pick,pl,pc,s,snaps};
+  }).filter(x=>x.sc>=50&&x.pick).sort((a,b)=>b.sc-a.sc);
+
+  if(!scored.length){
+    pg.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--dim);font-size:12px;">快照不足，無法產生建議</div>';
     return;
   }
   const parlays=[
-    {type:'🎯 單場最強',legs:valid.slice(0,1),note:'信號最強，移動停滯後進場'},
-    valid.length>=2&&{type:'🔗 2串1',legs:valid.slice(0,2),note:'兩場組合，中風險中賠率'},
-    valid.length>=3&&{type:'🚀 3串1',legs:valid.slice(0,3),note:'高賠率高風險，建議小注'},
+    {t:'🎯 單場最強',legs:scored.slice(0,1),note:'信號最強，移動停滯後進場'},
+    scored.length>=2&&{t:'🔗 2串1',legs:scored.slice(0,2),note:'兩場組合，中風險'},
+    scored.length>=3&&{t:'🚀 3串1',legs:scored.slice(0,3),note:'高賠率高風險，建議小注'},
   ].filter(Boolean);
 
-  grid.innerHTML=parlays.map(p=>{
-    const dec=p.legs.map(l=>toDecimal(l.pick==='OVER'?l.game.latest?.over_juice:l.game.latest?.under_juice));
-    const combined=dec.reduce((a,b)=>a*b,1);
-    const combAmer=combined>=2?'+'+Math.round((combined-1)*100):'-'+Math.round(100/(combined-1));
-    const avgConf=Math.round(p.legs.reduce((s,l)=>s+l.score,0)/p.legs.length);
-    const cc=avgConf>=75?'#39ff14':avgConf>=55?'#fbbf24':'#f87171';
-    const riskLabel=p.legs.length===1?(avgConf>=70?'低風險':'中風險'):p.legs.length===2?'中風險':'高風險';
-    const rCls=riskLabel==='低風險'?'risk-low':riskLabel==='中風險'?'risk-med':'risk-high';
-    const legsHTML=p.legs.map(l=>{
-      const home=(l.game.home||'').split(' ').pop();
-      const away=(l.game.away||'').split(' ').pop();
-      return `<div class="parlay-leg">
-        <div class="parlay-leg-game">${away} VS ${home}</div>
-        <div class="parlay-leg-pick" style="color:${l.pickColor}">${l.pickLabel}</div>
-        <div class="parlay-leg-conf">信心 ${l.score}/100</div>
-        <div class="conf-bar"><div class="conf-fill" style="width:${l.score}%;background:${cc}"></div></div>
-      </div>`;
-    }).join('');
-    return `<div class="parlay-card"><div class="parlay-card-body">
+  pg.innerHTML=parlays.map(p=>{
+    const dec=p.legs.map(l=>td2(l.pick==='OVER'?l.g.latest?.over_juice:l.g.latest?.under_juice));
+    const combo=dec.reduce((a,b)=>a*b,1);
+    const cA=combo>=2?'+'+Math.round((combo-1)*100):'-'+Math.round(100/(combo-1));
+    const avgC=Math.round(p.legs.reduce((s,l)=>s+l.sc,0)/p.legs.length);
+    const cc=avgC>=75?'#39ff14':avgC>=55?'#fbbf24':'#f87171';
+    const rl=p.legs.length===1?(avgC>=70?'低風險':'中風險'):p.legs.length===2?'中風險':'高風險';
+    const rc=rl==='低風險'?'risk-lo':rl==='中風險'?'risk-me':'risk-hi';
+    const lh=p.legs.map(l=>`<div class="p-leg">
+      <div class="p-game">${(l.g.away||'').split(' ').pop()} VS ${(l.g.home||'').split(' ').pop()}</div>
+      <div class="p-pick" style="color:${l.pc}">${l.pl}</div>
+      <div class="p-conf">信心 ${l.sc}/100</div>
+      <div class="cbar"><div class="cfill" style="width:${l.sc}%;background:${cc}"></div></div>
+    </div>`).join('');
+    return `<div class="p-card"><div class="p-body">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div class="parlay-type">${p.type}</div>
-        <span class="risk-chip ${rCls}">${riskLabel}</span>
+        <div class="p-type">${p.t}</div><span class="risk ${rc}">${rl}</span>
       </div>
-      <div class="parlay-legs">${legsHTML}</div>
-      <div class="parlay-footer">
+      <div class="p-legs">${lh}</div>
+      <div class="p-foot">
         <div><div style="font-size:9px;color:var(--dim);margin-bottom:2px">組合賠率</div>
-          <div class="parlay-odds" style="color:${cc}">${combAmer}</div></div>
-        <div><div class="parlay-conf" style="color:${cc}">${avgConf}</div>
-          <div class="parlay-conf-label">平均信心</div></div>
+          <div class="p-odds" style="color:${cc}">${cA}</div></div>
+        <div><div class="p-score" style="color:${cc}">${avgC}</div>
+          <div class="p-slbl">平均信心</div></div>
       </div>
-      <div class="parlay-note">${p.note}</div>
+      <div class="p-note">${p.note}</div>
     </div></div>`;
   }).join('');
 }
 
-// ── INIT ──────────────────────────────────────────────────────────────────────
-window.onload = fetchData;
+window.onload=fetchData;
 </script>
 </body>
 </html>
