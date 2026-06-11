@@ -86,6 +86,7 @@ function selectGame(id){
   const g=games.find(g=>g.game_id===id);
   if(!g) return;
   const p=document.getElementById('dpanel');
+  // 核心修復：確保顯示真實數據
   p.innerHTML=`
     <div style="background:#0d1b2e; padding:20px; border-radius:8px;">
         <h3 style="font-size:20px; margin-bottom:15px;">${g.away} VS ${g.home}</h3>
@@ -95,6 +96,7 @@ function selectGame(id){
             <div><p style="color:var(--dim)">Over 賠率</p><p style="font-size:18px; color:var(--orange)">${g.latest?.over_juice ?? '—'}</p></div>
             <div><p style="color:var(--dim)">Under 賠率</p><p style="font-size:18px; color:var(--cyan)">${g.latest?.under_juice ?? '—'}</p></div>
         </div>
+        <p style="margin-top:20px; color:var(--dim); font-size:11px;">資料已載入 · 快照時間: ${new Date(g.updated_at).toLocaleString()}</p>
     </div>`;
 }
 
