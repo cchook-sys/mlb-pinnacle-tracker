@@ -1,7 +1,7 @@
 """
 MLB Pinnacle Tracker v4 - Final Clean Version
 - MongoDB 持久化快照
-- 每 15 分鐘自動抓 Pinnacle 盤口
+- 每 60 分鐘自動抓 Pinnacle 盤口
 - 自動賽果結算 + 昨日歷史
 """
 
@@ -249,7 +249,7 @@ async def scheduler():
     while True:
         await fetch_and_store_odds()
         await fetch_and_settle()
-        await asyncio.sleep(15 * 60)   # 15 分鐘
+        await asyncio.sleep(60 * 60)   # 60 分鐘
 
 # ── App ───────────────────────────────────────────────────────────────────────
 @asynccontextmanager
