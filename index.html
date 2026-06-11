@@ -8,11 +8,14 @@
 <style>
 /* 你的原始 CSS 已全數保留 */
 *{box-sizing:border-box;margin:0;padding:0;}
-:root{ --bg:#0a0f1a; --surface:#111827; --card:#0d1b2e; --border:#1e3a5f; --text:#e6edf3; --dim:#4b5563; --accent:#39ff14; --blue:#3b82f6; --orange:#f97316; --cyan:#38bdf8; }
+:root{ --bg:#0a0f1a; --surface:#111827; --card:#0d1b2e; --border:#1e3a5f; --text:#e6edf3; --dim:#4b5563; --accent:#39ff14; --blue:#3b82f6; --orange:#f97316; --cyan:#38bdf8; --red:#f87171; }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:50;}
+::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:2px;}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:50;flex-shrink:0;}
 .logo{font-size:22px;font-weight:900;letter-spacing:3px;} .logo span{color:var(--accent);}
-.btn{cursor:pointer;font-family:inherit;font-weight:700;font-size:11px;padding:7px 14px;border-radius:5px;}
+.topbar-meta{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--dim);margin-top:2px;}
+.topbar-right{display:flex;gap:8px;align-items:center;}
+.btn{border:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:11px;padding:7px 14px;border-radius:5px;transition:all .15s;}
 .spin{display:inline-block;animation:spin 1s linear infinite;}
 @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 </style>
@@ -22,68 +25,80 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-
 <div class="topbar">
   <div>
     <div class="logo">MLB<span>ENTRY</span></div>
-    <div id="status-box" style="font-size:11px;color:var(--dim)">狀態: <span id="si">連線中...</span></div>
+    <div class="topbar-meta">
+      ET <span id="et-clock" style="color:#3b82f6;font-family:monospace;font-weight:700">--:--:--</span>
+      &nbsp;·&nbsp; <span id="si">連線中...</span>
+    </div>
   </div>
-  <button class="btn" style="background:#1d4ed8;color:#fff;" id="rbtn" onclick="fetchData()">↺ 更新盤口</button>
+  <div class="topbar-right">
+    <button class="btn" style="background:#1d4ed8;color:#fff;" id="rbtn" onclick="fetchData()">↺ 更新盤口</button>
+  </div>
 </div>
 
-<div class="main" style="display:flex; height: 90vh;">
-  <div class="sidebar" id="glist" style="width:360px; overflow-y:auto; border-right:1px solid var(--border);"></div>
-  <div class="detail" id="dpanel" style="flex:1; padding:20px;">選擇場次查看分析</div>
+<div class="main" style="display:flex; height: calc(100vh - 55px);">
+  <div class="sidebar" id="glist" style="width:360px; overflow-y:auto; border-right:1px solid #1a2535;">
+    <div class="sidebar-empty" style="padding:40px; text-align:center; color:var(--dim);">載入中...</div>
+  </div>
+  <div class="detail" id="dpanel" style="flex:1; overflow-y:auto; padding:20px;">
+    <div class="detail-empty" style="text-align:center; color:var(--dim); margin-top:50px;">選擇場次查看詳細分析</div>
+  </div>
 </div>
 
 <script>
 const API='https://mlb-pinnacle-tracker.onrender.com';
 let games=[];
 
+// 時鐘
+setInterval(()=>{
+  document.getElementById('et-clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'America/New_York'});
+},1000);
+
 async function fetchData(){
-  const btn = document.getElementById('rbtn');
-  const si = document.getElementById('si');
-  btn.disabled = true; 
-  btn.textContent = '更新中...';
-  
-  try {
-    // 增加 mode: 'cors' 解決跨網域問題，cache: 'no-store' 確保資料最新
-    const r = await fetch(`${API}/games`, { 
-        method: 'GET',
-        mode: 'cors',
-        cache: 'no-store',
-        headers: { 'Accept': 'application/json' }
-    });
-    
-    if(!r.ok) throw new Error('伺服器回應錯誤: ' + r.status);
-    
-    games = await r.json();
-    si.innerHTML = '<span style="color:var(--accent)">● 已連線</span>';
+  const btn=document.getElementById('rbtn');
+  const si=document.getElementById('si');
+  btn.disabled=true; btn.textContent='更新中...';
+  try{
+    // 強制 CORS 與 no-store 確保最新資料
+    const r=await fetch(`${API}/games`, { mode: 'cors', cache: 'no-store' });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    games=await r.json();
+    si.innerHTML='<span style="color:#39ff14">● 已連線</span>';
     renderList();
-  } catch(e) {
-    console.error("Fetch Data Error:", e);
-    si.innerHTML = '<span style="color:var(--red)">✕ 連線失敗</span>';
-    alert("連線失敗，請檢查網路或 Render 後端是否在運作中。");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '↺ 更新盤口';
+  }catch(e){
+    console.error(e);
+    si.innerHTML='<span style="color:#f87171">✕ 連線失敗</span>';
+  }finally{
+    btn.disabled=false; btn.textContent='↺ 更新盤口';
   }
 }
 
 function renderList(){
-  const el = document.getElementById('glist');
-  if(!games.length) { el.innerHTML = '<div style="padding:20px;color:var(--dim)">目前無盤口數據</div>'; return; }
-  
-  el.innerHTML = games.map(g => `
-    <div style="padding:15px; border-bottom:1px solid var(--border); cursor:pointer;" onclick="selectGame('${g.game_id}')">
-      <div style="font-weight:800">${g.away} VS ${g.home}</div>
-      <div style="color:var(--cyan)">總分: ${g.latest?.total ?? '—'}</div>
+  const el=document.getElementById('glist');
+  if(!games.length) { el.innerHTML='<div style="padding:20px;color:var(--dim)">無盤口數據</div>'; return; }
+  el.innerHTML=games.map(g=>`
+    <div style="padding:15px; border-bottom:1px solid #1a2535; cursor:pointer;" onclick="selectGame('${g.game_id}')">
+      <div style="font-weight:800; font-size:14px; margin-bottom:5px;">${g.away} VS ${g.home}</div>
+      <div style="color:var(--cyan); font-weight:700">總分: ${g.latest?.total ?? '—'}</div>
     </div>`).join('');
 }
 
 function selectGame(id){
-    const g = games.find(g => g.game_id === id);
-    if(g) document.getElementById('dpanel').innerHTML = `<h3>${g.home} 對戰詳細數據</h3><p>數據已載入。</p>`;
+  const g=games.find(g=>g.game_id===id);
+  if(!g) return;
+  const p=document.getElementById('dpanel');
+  p.innerHTML=`
+    <div style="background:#0d1b2e; padding:20px; border-radius:8px;">
+        <h3 style="font-size:20px; margin-bottom:15px;">${g.away} VS ${g.home}</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div><p style="color:var(--dim)">目前總分</p><p style="font-size:24px; font-weight:900">${g.latest?.total ?? '—'}</p></div>
+            <div><p style="color:var(--dim)">開盤總分</p><p style="font-size:18px;">${g.open?.total ?? '—'}</p></div>
+            <div><p style="color:var(--dim)">Over 賠率</p><p style="font-size:18px; color:var(--orange)">${g.latest?.over_juice ?? '—'}</p></div>
+            <div><p style="color:var(--dim)">Under 賠率</p><p style="font-size:18px; color:var(--cyan)">${g.latest?.under_juice ?? '—'}</p></div>
+        </div>
+    </div>`;
 }
 
-// 初始化
-window.onload = fetchData;
+window.onload=fetchData;
 </script>
 </body>
 </html>
