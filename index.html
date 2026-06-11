@@ -1,597 +1,428 @@
-bash
+"""
+MLB Pinnacle Tracker v4.1
+- 智慧排程：ET 08:00–23:00 每 30 分鐘抓取，其餘時間睡眠
+- 盤口沒變動不存快照（節省 MongoDB 空間）
+- GET /refresh 可手動喚醒立即抓取
+- MongoDB 持久化 + 自動賽果結算
+"""
 
-cat > /mnt/user-data/outputs/index.html << 'ENDOFFILE'
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MLBENTRY - Pinnacle 盤口監控</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0;}
-:root{
-  --bg:#0a0f1a; --surface:#111827; --card:#0d1b2e; --border:#1e3a5f;
-  --text:#e6edf3; --muted:#8b949e; --dim:#4b5563;
-  --accent:#39ff14; --blue:#3b82f6; --orange:#f97316;
-  --cyan:#38bdf8; --red:#f87171; --yellow:#fbbf24; --green:#4ade80;
-}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
-::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:2px;}
+import os, asyncio, logging
+from datetime import datetime, timezone, timedelta
+from contextlib import asynccontextmanager
 
-/* ── TOP BAR ── */
-.topbar{
-  background:var(--surface);border-bottom:1px solid var(--border);
-  padding:10px 20px;display:flex;justify-content:space-between;align-items:center;
-  position:sticky;top:0;z-index:50;flex-shrink:0;
-}
-.logo{font-size:22px;font-weight:900;letter-spacing:3px;}
-.logo span{color:var(--accent);}
-.topbar-meta{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--dim);margin-top:2px;}
-.topbar-right{display:flex;gap:8px;align-items:center;}
-.stat-row{display:flex;gap:12px;background:#09101a;border:1px solid var(--border);border-radius:5px;padding:6px 14px;}
-.stat{text-align:center;}
-.stat-lbl{font-size:8px;color:var(--dim);letter-spacing:1px;}
-.stat-val{font-size:18px;font-weight:900;font-family:monospace;line-height:1.2;}
-.btn{border:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:11px;padding:7px 14px;border-radius:5px;display:flex;align-items:center;gap:5px;transition:all .15s;letter-spacing:.3px;}
-.btn-blue{background:#1d4ed8;color:#fff;} .btn-blue:hover{background:#2563eb;}
-.btn-green{background:#0f2d0f;color:var(--accent);border:1px solid rgba(57,255,20,.3);} .btn-green:hover{background:#153d15;}
-.btn:disabled{opacity:.5;cursor:not-allowed;}
+import httpx
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
 
-/* ── TAB BAR ── */
-.tabbar{background:var(--bg);border-bottom:1px solid #1a2535;padding:8px 20px;display:flex;gap:6px;flex-shrink:0;}
-.tab{background:transparent;border:1px solid #1e3a5f;color:var(--dim);padding:5px 14px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;}
-.tab.on{background:#1d4ed8;border-color:#3b82f6;color:#fff;}
-.tab:hover:not(.on){color:var(--muted);}
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+log = logging.getLogger(__name__)
 
-/* ── MAIN SPLIT ── */
-.main{display:flex;height:calc(100vh - 93px);overflow:hidden;}
+# ── Config ────────────────────────────────────────────────────────────────────
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+MONGO_URI    = os.getenv("MONGO_URI", "")
+BOOKMAKER    = "pinnacle"
+SPORT        = "baseball_mlb"
+ODDS_BASE    = f"https://api.the-odds-api.com/v4/sports/{SPORT}"
 
-/* ── LEFT SIDEBAR ── */
-.sidebar{width:360px;flex-shrink:0;overflow-y:auto;border-right:1px solid #1a2535;}
-.sidebar-empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:12px;}
+# 排程設定（ET 時間）
+ACTIVE_START = 8   # 08:00 ET 開始
+ACTIVE_END   = 23  # 23:00 ET 結束
+FETCH_INTERVAL_MINS = 30  # 主動抓取間隔（分鐘）
 
-.game-card{
-  padding:12px 14px;border-bottom:1px solid #1a2535;cursor:pointer;
-  transition:background .12s;border-left:3px solid transparent;
-}
-.game-card:hover{background:rgba(255,255,255,.03);}
-.game-card.sel{background:#0d1b2e;border-left-color:var(--blue);}
-.game-card.s-over{border-left-color:var(--orange);}
-.game-card.s-under{border-left-color:var(--cyan);}
-.game-card.s-ready{border-left-color:var(--accent);}
+client_db = None
+db        = None
+_last_fetch_ts = None  # 上次成功抓取時間
 
-.gc-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
-.gc-date{font-size:10px;color:var(--dim);font-family:monospace;}
-.gc-snaps{font-size:9px;color:#1e3a5f;}
-.gc-teams{font-size:13px;font-weight:800;color:var(--text);margin-bottom:6px;}
-.gc-teams .away{color:var(--muted);}
-.gc-row3{display:flex;justify-content:space-between;align-items:center;}
-.gc-nums{display:flex;gap:10px;align-items:baseline;}
-.gc-total{font-size:14px;font-weight:900;font-family:monospace;color:var(--text);}
-.gc-delta{font-size:12px;font-weight:700;}
-.gc-win-delta{font-size:11px;font-weight:700;}
-.up{color:var(--orange);} .dn{color:var(--cyan);} .flat{color:var(--dim);}
+def get_db():
+    return db
 
-/* entry button on card */
-.gc-btn{font-size:10px;font-weight:800;padding:4px 12px;border-radius:4px;border:none;cursor:pointer;font-family:inherit;letter-spacing:.3px;}
-.gc-btn-enter{background:#dc2626;color:#fff;animation:pulse-r 1.4s ease-in-out infinite;}
-.gc-btn-watch{background:#1e293b;color:var(--dim);cursor:default;}
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def utc_now():
+    return datetime.now(timezone.utc)
 
-/* ── RIGHT PANEL ── */
-.detail{flex:1;overflow-y:auto;padding:20px 24px;background:var(--bg);}
-.detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--dim);gap:8px;text-align:center;}
+def et_now():
+    return utc_now().astimezone(timezone(timedelta(hours=-4)))
 
-.detail-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
-.detail-title{font-size:20px;font-weight:900;color:var(--text);}
-.detail-sub{font-size:11px;color:var(--dim);margin-top:3px;}
-.btn-enter-big{background:#dc2626;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;animation:pulse-r 1.4s ease-in-out infinite;letter-spacing:.5px;}
-.btn-enter-big.watch{background:#1e293b;color:var(--dim);animation:none;cursor:default;}
+def et_date_str(dt=None):
+    if dt is None:
+        dt = utc_now()
+    return dt.astimezone(timezone(timedelta(hours=-4))).strftime("%Y-%m-%d")
 
-/* chart */
-.chart-box{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:16px;}
-.chart-label{font-size:10px;color:var(--dim);letter-spacing:2px;margin-bottom:10px;}
-.chart-canvas{width:100%!important;height:240px!important;}
+def is_active_hours() -> bool:
+    """ET 08:00–23:00 為活躍時段"""
+    h = et_now().hour
+    return ACTIVE_START <= h < ACTIVE_END
 
-/* odds row */
-.odds-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
-.odds-cell{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center;}
-.odds-lbl{font-size:8px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
-.odds-val{font-size:16px;font-weight:900;font-family:monospace;}
+def signal_from_snaps(snaps: list) -> dict:
+    valid = [s for s in snaps if s.get("total") is not None]
+    if len(valid) < 2:
+        return {"total": "FLAT", "ml": "FLAT", "delta": 0}
+    td = round(valid[-1]["total"] - valid[0]["total"], 1)
+    ts = ("STEAM_OVER"  if td >= 0.5  else
+          "LEAN_OVER"   if td >= 0.25 else
+          "STEAM_UNDER" if td <= -0.5 else
+          "LEAN_UNDER"  if td <= -0.25 else "FLAT")
+    mld = (valid[-1].get("ml_home") or 0) - (valid[0].get("ml_home") or 0)
+    ms  = ("STEAM_HOME" if mld <= -15 else "STEAM_AWAY" if mld >= 15 else "FLAT")
+    return {"total": ts, "ml": ms, "delta": td}
 
-/* snap table */
-.snap-box{background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
-.snap-head{padding:7px 12px;font-size:9px;color:var(--dim);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--surface);}
-.snap-tbl{width:100%;border-collapse:collapse;font-size:11px;}
-.snap-tbl th{padding:5px 10px;text-align:left;color:var(--dim);font-size:9px;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:600;}
-.snap-tbl td{padding:6px 10px;border-bottom:1px solid rgba(30,58,95,.25);font-family:monospace;}
-.snap-tbl tr.new td{background:rgba(59,130,246,.06);}
+def pick_from_signal(sig, game):
+    d     = sig.get("delta", 0)
+    total = game.get("latest", {}).get("total")
+    if d >= 0.25:  return f"OVER {total}"
+    if d <= -0.25: return f"UNDER {total}"
+    return None
 
-/* ── HISTORY VIEW ── */
-.hist-view{flex:1;overflow-y:auto;}
-.hist-head{padding:14px 20px;border-bottom:1px solid #1a2535;display:flex;justify-content:space-between;align-items:center;}
-.hist-tbl{width:100%;border-collapse:collapse;font-size:12px;}
-.hist-tbl th{padding:8px 14px;font-size:9px;color:var(--dim);letter-spacing:1px;border-bottom:2px solid var(--border);background:var(--surface);font-weight:600;}
-.hist-tbl td{padding:10px 14px;border-bottom:1px solid rgba(30,58,95,.25);}
-.hist-tbl tr:hover td{background:rgba(255,255,255,.02);}
-.rb{display:inline-block;padding:3px 9px;border-radius:4px;font-size:10px;font-weight:800;border:1px solid;}
-.rw{background:rgba(74,222,128,.12);color:#4ade80;border-color:rgba(74,222,128,.3);}
-.rl{background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.3);}
-.rp{background:rgba(251,191,36,.12);color:#fbbf24;border-color:rgba(251,191,36,.3);}
-.rn{background:rgba(75,85,99,.15);color:var(--dim);border-color:var(--dim);}
+# ── Fetch Odds ────────────────────────────────────────────────────────────────
+async def fetch_and_store_odds(force: bool = False) -> dict:
+    """
+    抓取 Pinnacle 盤口並存入 MongoDB
+    force=True 時跳過時段限制（手動觸發）
+    回傳 {"stored": int, "skipped": int, "remaining": str}
+    """
+    global _last_fetch_ts
 
-/* ── PARLAY MODAL ── */
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;justify-content:center;align-items:center;padding:20px;}
-.modal-bg.open{display:flex;}
-.modal{background:var(--surface);border:1px solid rgba(57,255,20,.25);border-radius:10px;width:100%;max-width:880px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;}
-.modal-top{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
-.modal-top h2{font-size:17px;font-weight:900;letter-spacing:2px;color:var(--accent);}
-.modal-body{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;overflow-y:auto;}
-.p-card{background:var(--card);border:1px solid #1e3a5f;border-radius:7px;overflow:hidden;position:relative;}
-.p-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),#3b82f6);}
-.p-body{padding:12px 14px;}
-.p-type{font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:8px;}
-.p-legs{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
-.p-leg{background:var(--bg);border-radius:4px;padding:7px 9px;border:1px solid var(--border);}
-.p-game{font-size:11px;font-weight:700;color:var(--text);}
-.p-pick{font-size:11px;font-weight:900;margin-top:2px;}
-.p-conf{font-size:9px;color:var(--dim);margin-top:2px;}
-.cbar{height:3px;background:var(--border);border-radius:2px;margin-top:3px;overflow:hidden;}
-.cfill{height:100%;border-radius:2px;}
-.p-foot{display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid var(--border);padding:8px 0 0;}
-.p-odds{font-size:26px;font-weight:900;font-family:monospace;}
-.p-score{font-size:34px;font-weight:900;font-family:monospace;text-align:center;}
-.p-slbl{font-size:8px;color:var(--dim);text-align:center;}
-.risk{font-size:9px;font-weight:700;padding:2px 8px;border-radius:3px;border:1px solid;}
-.risk-lo{background:rgba(74,222,128,.12);color:#4ade80;border-color:rgba(74,222,128,.3);}
-.risk-me{background:rgba(251,191,36,.12);color:#fbbf24;border-color:rgba(251,191,36,.3);}
-.risk-hi{background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.3);}
-.p-note{font-size:10px;color:var(--dim);margin-top:6px;line-height:1.5;}
+    if not ODDS_API_KEY:
+        return {"error": "ODDS_API_KEY not set"}
 
-@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-@keyframes pulse-r{0%,100%{opacity:1}50%{opacity:.6}}
-@keyframes pulse-g{0%,100%{opacity:1}50%{opacity:.35}}
-.spin{display:inline-block;animation:spin 1s linear infinite;}
-</style>
-</head>
-<body>
+    if not force and not is_active_hours():
+        h = et_now().hour
+        log.info(f"😴 睡眠時段 ET {h:02d}:00，跳過抓取")
+        return {"skipped": "sleep_hours", "et_hour": h}
 
-<!-- TOP BAR -->
-<div class="topbar">
-  <div>
-    <div class="logo">MLB<span>ENTRY</span></div>
-    <div class="topbar-meta">
-      ET <span id="et-clock" style="color:#3b82f6;font-family:monospace;font-weight:700">--:--:--</span>
-      &nbsp;·&nbsp; 場次 <span id="gc" style="color:#fff;font-weight:700">0</span>
-      &nbsp;·&nbsp; 快照 <span id="sc" style="color:#3b82f6;font-weight:700">0</span>
-      &nbsp;·&nbsp; <span id="si" style="color:var(--dim)">連線中...</span>
-    </div>
-  </div>
-  <div class="topbar-right">
-    <div class="stat-row">
-      <div class="stat"><div class="stat-lbl">蒸汽</div><div class="stat-val" id="ss" style="color:#f97316">0</div></div>
-      <div class="stat"><div class="stat-lbl">可進場</div><div class="stat-val" id="sr" style="color:#39ff14;animation:pulse-g 1.4s ease-in-out infinite">0</div></div>
-      <div class="stat"><div class="stat-lbl">信號</div><div class="stat-val" id="sg" style="color:#3b82f6">0</div></div>
-      <div class="stat"><div class="stat-lbl">勝率</div><div class="stat-val" id="sw" style="color:#a78bfa">—</div></div>
-    </div>
-    <button class="btn btn-green" onclick="openParlay()">🎯 過關分析</button>
-    <button class="btn btn-blue" id="rbtn" onclick="fetchData()">
-      <span id="rico">↺</span><span id="rtxt">更新盤口</span>
-    </button>
-  </div>
-</div>
+    try:
+        url = (f"{ODDS_BASE}/odds/"
+               f"?apiKey={ODDS_API_KEY}&regions=us"
+               f"&markets=h2h,totals,spreads&bookmakers={BOOKMAKER}&oddsFormat=american")
 
-<!-- TAB BAR -->
-<div class="tabbar">
-  <button class="tab on" id="t1" onclick="switchTab('today')">📡 今日盤口</button>
-  <button class="tab" id="t2" onclick="switchTab('history')">📊 昨日結算</button>
-</div>
+        async with httpx.AsyncClient(timeout=25) as c:
+            r = await c.get(url)
 
-<!-- TODAY VIEW -->
-<div class="main" id="vt">
-  <div class="sidebar" id="glist">
-    <div class="sidebar-empty"><span class="spin" style="font-size:22px;display:block;margin-bottom:8px;">↺</span>連線 Pinnacle...</div>
-  </div>
-  <div class="detail" id="dpanel">
-    <div class="detail-empty">
-      <div style="font-size:40px;opacity:.25">📊</div>
-      <div style="font-size:13px;color:var(--muted)">點擊左側場次查看詳細分析</div>
-      <div style="font-size:11px;color:var(--dim);margin-top:4px">折線圖 · 快照歷史 · 進場建議</div>
-    </div>
-  </div>
-</div>
+        remaining = r.headers.get("x-requests-remaining", "?")
+        log.info(f"Odds API {r.status_code} | remaining={remaining} | force={force}")
 
-<!-- HISTORY VIEW -->
-<div class="main" id="vh" style="display:none;">
-  <div class="hist-view">
-    <div class="hist-head">
-      <div>
-        <div style="font-size:15px;font-weight:800;">昨日結算記錄</div>
-        <div style="font-size:11px;color:var(--dim);margin-top:2px;">自動抓取賽果 · 每日覆蓋更新 · 修正推演模型</div>
-      </div>
-      <div id="hstat" style="font-size:12px;color:var(--muted);text-align:right;"></div>
-    </div>
-    <div style="overflow-x:auto;">
-      <table class="hist-tbl">
-        <thead><tr>
-          <th>比賽</th><th>開盤</th><th>收盤</th><th>移動</th>
-          <th>推算方向</th><th>實際總分</th><th>結果</th><th>修正方向</th>
-        </tr></thead>
-        <tbody id="htbody"><tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">載入中...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-</div>
+        if r.status_code != 200:
+            log.error(f"Odds error: {r.text[:200]}")
+            return {"error": f"API {r.status_code}"}
 
-<!-- PARLAY MODAL -->
-<div class="modal-bg" id="modal" onclick="if(event.target===this)closeParlay()">
-  <div class="modal">
-    <div class="modal-top">
-      <h2>⚡ 過關建議</h2>
-      <div style="display:flex;gap:10px;align-items:center;">
-        <span style="font-size:10px;color:var(--dim)">Pinnacle 破口 · 每 60 分鐘更新</span>
-        <button onclick="closeParlay()" style="background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;font-weight:700;">✕</button>
-      </div>
-    </div>
-    <div class="modal-body" id="pgrid"></div>
-    <div style="padding:8px 18px;background:var(--bg);border-top:1px solid var(--border);font-size:10px;color:var(--dim);">
-      ⚠ 僅供參考。快照越多越準確。
-    </div>
-  </div>
-</div>
+        games   = r.json()
+        ts      = utc_now()
+        today   = et_date_str(ts)
+        coll    = get_db()["snapshots"]
+        stored  = 0
+        skipped = 0
 
-<script>
-const API='https://mlb-pinnacle-tracker.onrender.com';
-let games=[],selId=null,chartObj=null;
+        for g in games:
+            pin     = next((b for b in g.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
+            if not pin:
+                continue
+            totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
+            h2h     = next((m for m in pin["markets"] if m["key"] == "h2h"),     None)
+            spreads = next((m for m in pin["markets"] if m["key"] == "spreads"), None)
 
-// clock
-setInterval(()=>{
-  document.getElementById('et-clock').textContent=
-    new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'America/New_York'});
-},1000);
+            over    = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Over"),          None)
+            under   = next((o for o in (totals  or {}).get("outcomes", []) if o["name"] == "Under"),         None)
+            ml_home = next((o for o in (h2h     or {}).get("outcomes", []) if o["name"] == g["home_team"]), None)
+            ml_away = next((o for o in (h2h     or {}).get("outcomes", []) if o["name"] == g["away_team"]), None)
+            sp_home = next((o for o in (spreads or {}).get("outcomes", []) if o["name"] == g["home_team"]), None)
 
-// helpers
-const fo=n=>n==null?'—':n>0?'+'+n:''+n;
-const mu=iso=>Math.round((new Date(iso)-Date.now())/60000);
-const fet=iso=>new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
-const fmins=m=>m<=0?'🔴 LIVE':m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+'m':m+'m';
+            snap = {
+                "ts":          ts,
+                "total":       over["point"]    if over    else None,
+                "over_juice":  over["price"]    if over    else None,
+                "under_juice": under["price"]   if under   else None,
+                "ml_home":     ml_home["price"] if ml_home else None,
+                "ml_away":     ml_away["price"] if ml_away else None,
+                "spread_home": sp_home["point"] if sp_home else None,
+            }
 
-function sig(snaps){
-  if(!snaps||snaps.length<2)return{lbl:'觀望',d:0,steam:false,col:'#4b5563',pick:null,cls:''};
-  const d=+(snaps[snaps.length-1].total-snaps[0].total).toFixed(1);
-  if(d>=0.5) return{lbl:'⚡ 大分蒸汽',d,steam:true,col:'#f97316',pick:'OVER', cls:'s-over'};
-  if(d<=-0.5)return{lbl:'⚡ 小分蒸汽',d,steam:true,col:'#38bdf8',pick:'UNDER',cls:'s-under'};
-  if(d>=0.25)return{lbl:'↑ 大分傾向',d,steam:false,col:'#fb923c',pick:'OVER', cls:''};
-  if(d<=-0.25)return{lbl:'↓ 小分傾向',d,steam:false,col:'#7dd3fc',pick:'UNDER',cls:''};
-  return{lbl:'觀望',d,steam:false,col:'#4b5563',pick:null,cls:''};
-}
-function ent(snaps,mins){
-  if(mins<=0)  return{lbl:'進行中',  btnCls:'gc-btn-watch',isReady:false};
-  if(mins<20)  return{lbl:'已過期',  btnCls:'gc-btn-watch',isReady:false};
-  const s=sig(snaps);
-  if(!s.pick)  return{lbl:'觀望',    btnCls:'gc-btn-watch',isReady:false};
-  if(snaps.length>=2){
-    const r=Math.abs(snaps[snaps.length-1].total-snaps[snaps.length-2].total);
-    if(r>=0.1) return{lbl:'等待停滯',btnCls:'gc-btn-watch',isReady:false};
-  }
-  return{lbl:'進場',btnCls:'gc-btn-enter',isReady:true};
-}
+            existing = await coll.find_one({"game_id": g["id"], "date": today})
+            if existing:
+                prev_snaps = existing.get("snapshots", [])
+                last = prev_snaps[-1] if prev_snaps else {}
 
-async function fetchData(){
-  const btn=document.getElementById('rbtn');
-  const ico=document.getElementById('rico');
-  const txt=document.getElementById('rtxt');
-  btn.disabled=true; ico.classList.add('spin'); txt.textContent='更新中...';
-  try{
-    const r=await fetch(API+'/games');
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    games=await r.json();
-    games.sort((a,b)=>new Date(a.commence_time)-new Date(b.commence_time));
-    document.getElementById('si').innerHTML='<span style="color:#39ff14">● 已連線</span>';
-    document.getElementById('gc').textContent=games.length;
-    document.getElementById('sc').textContent=games.reduce((s,g)=>s+(g.snapshot_count||0),0);
-    renderList();
-    if(selId){const g=games.find(g=>g.game_id===selId);if(g)renderDetail(g);}
-    calcStats();
-    fetchStats();
-  }catch(e){
-    document.getElementById('si').innerHTML='<span style="color:#f87171">✕ '+e.message+'</span>';
-    document.getElementById('glist').innerHTML=
-      `<div class="sidebar-empty" style="color:#f87171;">連線失敗<br><a href="${API}" target="_blank" style="color:#3b82f6;font-size:10px;">喚醒後端</a></div>`;
-  }finally{btn.disabled=false;ico.classList.remove('spin');txt.textContent='更新盤口';}
-}
+                # ── 只有數據真的變動才存新快照 ──────────────────────────────
+                total_changed   = last.get("total")   != snap["total"]
+                ml_changed      = last.get("ml_home") != snap["ml_home"]
+                juice_changed   = last.get("over_juice") != snap["over_juice"]
+                anything_changed = total_changed or ml_changed or juice_changed
 
-function calcStats(){
-  let st=0,rd=0,sg=0;
-  games.forEach(g=>{
-    const snaps=(g.history||[]).filter(s=>s.total!=null);
-    const s=sig(snaps),e=ent(snaps,mu(g.commence_time));
-    if(s.steam)st++; if(s.pick)sg++; if(e.isReady)rd++;
-  });
-  document.getElementById('ss').textContent=st;
-  document.getElementById('sr').textContent=rd;
-  document.getElementById('sg').textContent=sg;
-}
+                if not anything_changed:
+                    skipped += 1
+                    continue  # 跳過，不浪費儲存空間
 
-function renderList(){
-  const el=document.getElementById('glist');
-  if(!games.length){el.innerHTML='<div class="sidebar-empty">目前無盤口數據</div>';return;}
-  el.innerHTML=games.map(g=>{
-    const snaps=(g.history||[]).filter(s=>s.total!=null);
-    const mins=mu(g.commence_time);
-    const s=sig(snaps),e=ent(snaps,mins);
-    const cur=snaps.length?snaps[snaps.length-1].total:g.latest?.total;
-    const mlDelta=snaps.length>=2?(snaps[snaps.length-1].ml_home||0)-(snaps[0].ml_home||0):0;
-    const dd=s.d;
-    const dc=dd>0?'up':dd<0?'dn':'flat';
-    const ds=dd===0?'0':dd>0?'+'+dd:''+dd;
-    const mdc=mlDelta>0?'up':mlDelta<0?'dn':'flat';
-    const mds=mlDelta===0?'0':mlDelta>0?'+'+mlDelta:''+mlDelta;
-    const home=(g.home||'').split(' ').pop();
-    const away=(g.away||'').split(' ').pop();
-    // date portion
-    const dt=new Date(g.commence_time);
-    const dateStr=(dt.getMonth()+1).toString().padStart(2,'0')+'/'+(dt.getDate()).toString().padStart(2,'0');
-    const timeStr=fet(g.commence_time);
-    let cls='game-card'+( selId===g.game_id?' sel':'' )+( s.cls?' '+s.cls:'' )+(e.isReady&&!s.steam?' s-ready':'');
-    return `<div class="${cls}" onclick="selectGame('${g.game_id}')">
-      <div class="gc-row1">
-        <span class="gc-date">${dateStr} ${timeStr} 📸:${g.snapshot_count||0}</span>
-      </div>
-      <div class="gc-teams"><span class="away">${away}</span> VS ${home}</div>
-      <div class="gc-row3">
-        <div class="gc-nums">
-          <span class="gc-total">${cur??'—'}</span>
-          <span class="gc-delta ${dc}">大小: ${ds}</span>
-          <span class="gc-win-delta ${mdc}">獨贏: ${mds}</span>
-        </div>
-        <button class="gc-btn ${e.btnCls}" onclick="event.stopPropagation();selectGame('${g.game_id}')">
-          ${e.isReady?'🔥 進場':'🚀 觀望'}
-        </button>
-      </div>
-    </div>`;
-  }).join('');
-}
+                new_snaps = prev_snaps[-49:] + [snap]
+                sig = signal_from_snaps(new_snaps)
+                await coll.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "snapshots":  new_snaps,
+                        "latest":     snap,
+                        "signal":     sig,
+                        "updated_at": ts,
+                    }}
+                )
+                stored += 1
+            else:
+                sig = signal_from_snaps([snap])
+                await coll.insert_one({
+                    "game_id":       g["id"],
+                    "date":          today,
+                    "home":          g["home_team"],
+                    "away":          g["away_team"],
+                    "commence_time": g["commence_time"],
+                    "snapshots":     [snap],
+                    "open":          snap,
+                    "latest":        snap,
+                    "signal":        sig,
+                    "created_at":    ts,
+                    "updated_at":    ts,
+                })
+                stored += 1
 
-function selectGame(id){
-  selId=id;
-  renderList();
-  const g=games.find(g=>g.game_id===id);
-  if(g)renderDetail(g);
-}
+        _last_fetch_ts = ts
+        log.info(f"✅ stored={stored} skipped(no change)={skipped} total={len(games)} remaining={remaining}")
+        return {"stored": stored, "skipped_no_change": skipped, "total_games": len(games), "remaining": remaining}
 
-function renderDetail(g){
-  const panel=document.getElementById('dpanel');
-  const snaps=(g.history||[]).filter(s=>s.total!=null);
-  const mins=mu(g.commence_time);
-  const s=sig(snaps),e=ent(snaps,mins);
-  const lat=g.latest||{};
-  const cur=snaps.length?snaps[snaps.length-1].total:lat.total;
-  const open=snaps.length?snaps[0].total:g.open?.total;
-  const home=g.home||'',away=g.away||'';
+    except Exception as e:
+        log.error(f"fetch_odds error: {e}")
+        return {"error": str(e)}
 
-  panel.innerHTML=`
-    <div class="detail-head">
-      <div>
-        <div class="detail-title">${away.split(' ').pop()} VS ${home.split(' ').pop()}</div>
-        <div class="detail-sub">${fet(g.commence_time)} ET · ${fmins(mins)} · ${g.snapshot_count||0} 快照 · <span style="color:${s.col}">${s.lbl}</span></div>
-      </div>
-      <button class="btn-enter-big${e.isReady?'':' watch'}"
-        onclick="${e.isReady?`alert('進場方向：${s.lbl}\\n大小分：${cur}\\n建議確認移動停滯後進場')`:''}"
-      >🔥 ${e.isReady?'建議進場':e.lbl}</button>
-    </div>
+# ── Fetch Scores & Settle ─────────────────────────────────────────────────────
+async def fetch_and_settle():
+    if not ODDS_API_KEY:
+        return
+    try:
+        url = f"{ODDS_BASE}/scores/?apiKey={ODDS_API_KEY}&daysFrom=1&dateFormat=iso"
+        async with httpx.AsyncClient(timeout=25) as c:
+            r = await c.get(url)
+        if r.status_code != 200:
+            return
 
-    <div class="chart-box">
-      <div class="chart-label">盤口移動走勢 · Pinnacle 快照</div>
-      <canvas id="lc" class="chart-canvas"></canvas>
-    </div>
+        scores    = r.json()
+        ts        = utc_now()
+        yesterday = et_date_str(ts - timedelta(days=1))
+        snaps_col = get_db()["snapshots"]
+        hist_col  = get_db()["history"]
+        settled   = 0
 
-    <div class="odds-row">
-      <div class="odds-cell"><div class="odds-lbl">開盤</div><div class="odds-val" style="color:#8b949e">${open??'—'}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">現盤</div><div class="odds-val" style="color:#e6edf3">${cur??'—'}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">Over</div><div class="odds-val" style="color:#f97316">${fo(lat.over_juice)}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">Under</div><div class="odds-val" style="color:#38bdf8">${fo(lat.under_juice)}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">主隊 ML</div><div class="odds-val" style="color:#e6edf3">${fo(lat.ml_home)}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">客隊 ML</div><div class="odds-val" style="color:#8b949e">${fo(lat.ml_away)}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">移動幅度</div><div class="odds-val" style="color:${s.d>0?'#f97316':s.d<0?'#38bdf8':'#4b5563'}">${s.d>0?'+':''}${s.d}</div></div>
-      <div class="odds-cell"><div class="odds-lbl">讓分</div><div class="odds-val" style="color:#8b949e">${fo(lat.spread_home)}</div></div>
-    </div>
+        for s in scores:
+            if not s.get("completed"):
+                continue
+            score_data = s.get("scores") or []
+            if len(score_data) < 2:
+                continue
+            try:
+                total_runs = sum(int(sc["score"]) for sc in score_data)
+            except Exception:
+                continue
 
-    ${snaps.length>0?`
-    <div class="snap-box">
-      <div class="snap-head">快照歷史 · ${snaps.length} 筆</div>
-      <table class="snap-tbl">
-        <thead><tr><th>#</th><th>大小分</th><th>移動</th><th>Over</th><th>Under</th><th>主ML</th><th>客ML</th></tr></thead>
-        <tbody>${[...snaps].reverse().map((s2,i)=>{
-          const prev=snaps[snaps.length-2-i];
-          const d=s2.total&&prev?.total?+(s2.total-prev.total).toFixed(1):null;
-          const dc=d==null?'#4b5563':d>0?'#f97316':d<0?'#38bdf8':'#4b5563';
-          return `<tr class="${i===0?'new':''}">
-            <td style="color:#4b5563">${snaps.length-i}</td>
-            <td style="font-weight:${i===0?800:400};color:${i===0?'#e6edf3':'#8b949e'}">${s2.total??'—'}</td>
-            <td style="color:${dc};font-weight:700">${d==null?'—':d===0?'─':d>0?`▲+${d}`:`▼${d}`}</td>
-            <td style="color:#f97316">${fo(s2.over_juice)}</td>
-            <td style="color:#38bdf8">${fo(s2.under_juice)}</td>
-            <td style="color:#8b949e">${fo(s2.ml_home)}</td>
-            <td style="color:#8b949e">${fo(s2.ml_away)}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>
-    </div>`:'<div style="text-align:center;padding:20px;color:var(--dim);font-size:11px;">快照累積中，60 分鐘後更新</div>'}
-  `;
+            game_doc = await snaps_col.find_one({"game_id": s["id"], "date": yesterday})
+            if not game_doc:
+                game_doc = await snaps_col.find_one({"game_id": s["id"]})
+            if not game_doc:
+                continue
 
-  // draw chart
-  if(chartObj){chartObj.destroy();chartObj=null;}
-  const canvas=document.getElementById('lc');
-  if(!canvas||!snaps.length)return;
-  const labels=snaps.map(s2=>{
-    const d=new Date(s2.ts);
-    return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
-  });
-  chartObj=new Chart(canvas,{
-    data:{
-      labels,
-      datasets:[
-        {type:'line',label:'大小分',data:snaps.map(s2=>s2.total),
-         borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.07)',
-         borderWidth:2,pointRadius:4,pointBackgroundColor:'#38bdf8',
-         tension:.25,fill:true,yAxisID:'y'},
-        {type:'line',label:'主獨贏',data:snaps.map(s2=>s2.ml_home),
-         borderColor:'#fbbf24',backgroundColor:'transparent',
-         borderWidth:1.5,borderDash:[6,3],pointRadius:3,pointBackgroundColor:'#fbbf24',
-         tension:.3,fill:false,yAxisID:'y2'},
-      ]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{labels:{color:'#8b949e',font:{size:10},usePointStyle:true,pointStyleWidth:18}},
-        tooltip:{backgroundColor:'#0d1b2e',borderColor:'#1e3a5f',borderWidth:1,
-                 titleColor:'#8b949e',bodyColor:'#e6edf3',padding:10}
-      },
-      scales:{
-        x:{ticks:{color:'#4b5563',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(30,58,95,.25)'}},
-        y:{position:'left',ticks:{color:'#38bdf8',font:{size:10}},grid:{color:'rgba(30,58,95,.25)'},
-           title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}}},
-        y2:{position:'right',ticks:{color:'#fbbf24',font:{size:10}},grid:{drawOnChartArea:false},
-            title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}}}
-      }
+            snaps  = game_doc.get("snapshots", [])
+            sig    = signal_from_snaps(snaps)
+            pick   = pick_from_signal(sig, game_doc)
+            total  = (game_doc.get("open") or {}).get("total")
+            result = None
+
+            if pick and total:
+                if "OVER"  in pick: result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
+                if "UNDER" in pick: result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
+
+            entry = {
+                "game_id":       s["id"],
+                "date":          yesterday,
+                "home":          game_doc["home"],
+                "away":          game_doc["away"],
+                "commence_time": game_doc["commence_time"],
+                "open_total":    total,
+                "close_total":   (game_doc.get("latest") or {}).get("total"),
+                "total_delta":   sig.get("delta", 0),
+                "signal":        sig,
+                "pick":          pick,
+                "actual_total":  total_runs,
+                "result":        result,
+                "settled_at":    ts,
+            }
+            await hist_col.update_one(
+                {"game_id": s["id"], "date": yesterday},
+                {"$set": entry},
+                upsert=True
+            )
+            await snaps_col.update_one(
+                {"_id": game_doc["_id"]},
+                {"$set": {"result": result, "actual_total": total_runs}}
+            )
+            settled += 1
+
+        # 清除 2 天前舊記錄
+        cutoff = et_date_str(ts - timedelta(days=2))
+        await hist_col.delete_many({"date": {"$lt": cutoff}})
+        log.info(f"✅ Settled {settled} games | cutoff={cutoff}")
+
+    except Exception as e:
+        log.error(f"settle error: {e}")
+
+# ── Smart Scheduler ───────────────────────────────────────────────────────────
+async def scheduler():
+    """
+    智慧排程：
+    - ET 08:00–23:00：每 30 分鐘抓取
+    - ET 00:00–08:00：睡眠，每 5 分鐘檢查是否到了活躍時段
+    """
+    while True:
+        if is_active_hours():
+            await fetch_and_store_odds()
+            await fetch_and_settle()
+            log.info(f"⏰ 下次抓取：{FETCH_INTERVAL_MINS} 分鐘後")
+            await asyncio.sleep(FETCH_INTERVAL_MINS * 60)
+        else:
+            et = et_now()
+            # 計算到下一個活躍時段還有多久
+            if et.hour < ACTIVE_START:
+                mins_to_active = (ACTIVE_START - et.hour) * 60 - et.minute
+            else:
+                # 超過 23:00，等到明天 08:00
+                mins_to_active = (24 - et.hour + ACTIVE_START) * 60 - et.minute
+
+            log.info(f"😴 睡眠中 ET {et.strftime('%H:%M')}，距離活躍時段 {mins_to_active} 分鐘")
+            # 最多等 5 分鐘就重新檢查（避免錯過活躍時段開始）
+            await asyncio.sleep(min(5 * 60, mins_to_active * 60))
+
+# ── App Startup ───────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client_db, db
+    if MONGO_URI:
+        client_db = AsyncIOMotorClient(MONGO_URI)
+        db        = client_db["mlb_tracker"]
+        await db["snapshots"].create_index([("game_id", 1), ("date", 1)], unique=True)
+        await db["history"].create_index([("game_id", 1), ("date", 1)],   unique=True)
+        log.info("✅ MongoDB connected")
+    else:
+        log.error("MONGO_URI not set!")
+
+    # 啟動時立刻抓一次（不管時段）
+    await fetch_and_store_odds(force=True)
+    await fetch_and_settle()
+
+    asyncio.create_task(scheduler())
+    log.info(f"⏰ Scheduler: active ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00, interval={FETCH_INTERVAL_MINS}min")
+    yield
+    if client_db:
+        client_db.close()
+
+app = FastAPI(title="MLB Pinnacle Tracker v4.1", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+@app.get("/")
+async def root():
+    et   = et_now()
+    active = is_active_hours()
+    return {
+        "status":      "ok",
+        "version":     "4.1",
+        "et_time":     et.strftime("%Y-%m-%d %H:%M ET"),
+        "active":      active,
+        "schedule":    f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
+        "last_fetch":  _last_fetch_ts.isoformat() if _last_fetch_ts else None,
     }
-  });
-}
 
-function switchTab(t){
-  document.getElementById('vt').style.display=t==='today'?'flex':'none';
-  document.getElementById('vh').style.display=t==='history'?'flex':'none';
-  document.getElementById('t1').classList.toggle('on',t==='today');
-  document.getElementById('t2').classList.toggle('on',t==='history');
-  if(t==='history')fetchHistory();
-}
+@app.get("/refresh")
+async def manual_refresh():
+    """手動觸發立即抓取（前端按更新時呼叫，跳過時段限制）"""
+    log.info("🖱️ 手動觸發抓取")
+    result = await fetch_and_store_odds(force=True)
+    await fetch_and_settle()
+    return {"triggered": True, **result}
 
-async function fetchHistory(){
-  const tb=document.getElementById('htbody');
-  tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--dim)">載入中...</td></tr>';
-  try{
-    const r=await fetch(API+'/history');
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    renderHistory(await r.json());
-  }catch(e){
-    tb.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:30px;color:#f87171">載入失敗：${e.message}</td></tr>`;
-  }
-}
-function renderHistory(data){
-  const tb=document.getElementById('htbody');
-  if(!data.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">昨日尚無結算記錄</td></tr>';return;}
-  let w=0,l=0,p=0;
-  tb.innerHTML=data.map(g=>{
-    const d=g.total_delta||0;
-    const ds=d===0?'─':d>0?`<span class="up">▲+${d}</span>`:`<span class="dn">▼${d}</span>`;
-    let rb='<span class="rb rn">未結算</span>';
-    if(g.result==='WIN'){rb='<span class="rb rw">✓ 過盤</span>';w++;}
-    if(g.result==='LOSS'){rb='<span class="rb rl">✗ 未過</span>';l++;}
-    if(g.result==='PUSH'){rb='<span class="rb rp">~ Push</span>';p++;}
-    let co='─';
-    if(g.result==='LOSS'&&g.pick)
-      co=g.pick.includes('OVER')?'<span class="dn">↓ 下次考慮小分</span>':'<span class="up">↑ 下次考慮大分</span>';
-    else if(g.result==='WIN') co='<span style="color:#4ade80">✓ 方向正確</span>';
-    return `<tr>
-      <td><div style="font-weight:700;font-size:12px">${(g.away||'').split(' ').pop()} @ ${(g.home||'').split(' ').pop()}</div>
-          <div style="font-size:10px;color:var(--dim);margin-top:1px">${fet(g.commence_time)}</div></td>
-      <td style="font-family:monospace;color:#8b949e">${g.open_total??'—'}</td>
-      <td style="font-family:monospace;font-weight:700">${g.close_total??'—'}</td>
-      <td>${ds}</td>
-      <td style="font-weight:700;color:${g.pick?.includes('OVER')?'#f97316':'#38bdf8'}">${g.pick||'<span style="color:var(--dim)">觀望</span>'}</td>
-      <td style="font-family:monospace;font-size:17px;font-weight:900">${g.actual_total??'—'}</td>
-      <td>${rb}</td>
-      <td style="font-size:11px">${co}</td>
-    </tr>`;
-  }).join('');
-  const tot=w+l;
-  const wr=tot>0?Math.round(w/tot*100):0;
-  document.getElementById('hstat').innerHTML=
-    `<div style="font-weight:800">${w}勝 ${l}敗 ${p}平</div>
-     <div style="color:${wr>=55?'#4ade80':wr>=45?'#fbbf24':'#f87171'};font-weight:800">勝率 ${wr}%</div>`;
-}
+@app.get("/games")
+async def get_games():
+    today = et_date_str()
+    docs  = await get_db()["snapshots"].find({"date": today}).sort("commence_time", 1).to_list(50)
+    result = []
+    for d in docs:
+        snaps = d.get("snapshots", [])
+        first = snaps[0]  if snaps else {}
+        last  = snaps[-1] if snaps else {}
+        sig   = signal_from_snaps(snaps)
+        hist  = []
+        for s in snaps:
+            ts_val = s.get("ts")
+            hist.append({
+                "ts":          ts_val.isoformat() if isinstance(ts_val, datetime) else str(ts_val),
+                "total":       s.get("total"),
+                "over_juice":  s.get("over_juice"),
+                "under_juice": s.get("under_juice"),
+                "ml_home":     s.get("ml_home"),
+                "ml_away":     s.get("ml_away"),
+            })
+        result.append({
+            "game_id":        d["game_id"],
+            "home":           d["home"],
+            "away":           d["away"],
+            "commence_time":  d["commence_time"],
+            "snapshot_count": len(snaps),
+            "open":    {"total": first.get("total"), "ml_home": first.get("ml_home"), "ml_away": first.get("ml_away")},
+            "latest":  {"total": last.get("total"),  "over_juice": last.get("over_juice"),
+                        "under_juice": last.get("under_juice"), "ml_home": last.get("ml_home"),
+                        "ml_away": last.get("ml_away"), "spread_home": last.get("spread_home")},
+            "delta":   {"total": sig["delta"]},
+            "signal":  {"total": sig["total"], "ml": sig["ml"]},
+            "history": hist,
+            "result":        d.get("result"),
+            "actual_total":  d.get("actual_total"),
+        })
+    return result
 
-async function fetchStats(){
-  try{
-    const r=await fetch(API+'/stats');if(!r.ok)return;
-    const s=await r.json();
-    document.getElementById('sw').textContent=s.total>0?s.win_rate+'%':'—';
-  }catch(_){}
-}
+@app.get("/history")
+async def get_history():
+    yesterday = et_date_str(utc_now() - timedelta(days=1))
+    docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time", 1).to_list(30)
+    result    = []
+    for d in docs:
+        result.append({
+            "game_id":       d["game_id"],
+            "home":          d["home"],
+            "away":          d["away"],
+            "commence_time": d["commence_time"],
+            "date":          d["date"],
+            "open_total":    d.get("open_total"),
+            "close_total":   d.get("close_total"),
+            "total_delta":   d.get("total_delta", 0),
+            "pick":          d.get("pick"),
+            "actual_total":  d.get("actual_total"),
+            "result":        d.get("result"),
+            "signal":        d.get("signal", {}),
+        })
+    return result
 
-function openParlay(){document.getElementById('modal').classList.add('open');buildParlay();}
-function closeParlay(){document.getElementById('modal').classList.remove('open');}
-const td2=o=>o==null?1.91:o>0?+(1+o/100).toFixed(3):+(1+100/Math.abs(o)).toFixed(3);
-
-function buildParlay(){
-  const pg=document.getElementById('pgrid');
-  const scored=games.map(g=>{
-    const snaps=(g.history||[]).filter(s=>s.total!=null);
-    const mins=mu(g.commence_time);
-    const s=sig(snaps),e=ent(snaps,mins);
-    let sc=0;
-    if(Math.abs(s.d)>=0.5)sc+=40;else if(Math.abs(s.d)>=0.25)sc+=20;
-    if(e.isReady)sc+=25;else if(e.lbl==='等待停滯')sc+=10;
-    const sn=g.snapshot_count||0;
-    if(sn>=5)sc+=15;else if(sn>=3)sc+=10;else if(sn>=2)sc+=5;
-    if(mins>=120&&mins<=480)sc+=10;
-    const oj=g.latest?.over_juice,uj=g.latest?.under_juice;
-    if(oj&&uj&&Math.abs(oj)<=115&&Math.abs(uj)<=115)sc+=10;
-    let pick=null,pl='觀望',pc='#4b5563';
-    if(s.d>=0.5){pick='OVER';pl='大分 OVER '+g.latest?.total;pc='#f97316';}
-    else if(s.d<=-0.5){pick='UNDER';pl='小分 UNDER '+g.latest?.total;pc='#38bdf8';}
-    else if(s.d>=0.25){pick='OVER';pl='大分傾向 '+g.latest?.total;pc='#fb923c';}
-    else if(s.d<=-0.25){pick='UNDER';pl='小分傾向 '+g.latest?.total;pc='#7dd3fc';}
-    return{g,sc,pick,pl,pc,s,snaps};
-  }).filter(x=>x.sc>=50&&x.pick).sort((a,b)=>b.sc-a.sc);
-
-  if(!scored.length){
-    pg.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--dim);font-size:12px;">快照不足，無法產生建議</div>';
-    return;
-  }
-  const parlays=[
-    {t:'🎯 單場最強',legs:scored.slice(0,1),note:'信號最強，移動停滯後進場'},
-    scored.length>=2&&{t:'🔗 2串1',legs:scored.slice(0,2),note:'兩場組合，中風險'},
-    scored.length>=3&&{t:'🚀 3串1',legs:scored.slice(0,3),note:'高賠率高風險，建議小注'},
-  ].filter(Boolean);
-
-  pg.innerHTML=parlays.map(p=>{
-    const dec=p.legs.map(l=>td2(l.pick==='OVER'?l.g.latest?.over_juice:l.g.latest?.under_juice));
-    const combo=dec.reduce((a,b)=>a*b,1);
-    const cA=combo>=2?'+'+Math.round((combo-1)*100):'-'+Math.round(100/(combo-1));
-    const avgC=Math.round(p.legs.reduce((s,l)=>s+l.sc,0)/p.legs.length);
-    const cc=avgC>=75?'#39ff14':avgC>=55?'#fbbf24':'#f87171';
-    const rl=p.legs.length===1?(avgC>=70?'低風險':'中風險'):p.legs.length===2?'中風險':'高風險';
-    const rc=rl==='低風險'?'risk-lo':rl==='中風險'?'risk-me':'risk-hi';
-    const lh=p.legs.map(l=>`<div class="p-leg">
-      <div class="p-game">${(l.g.away||'').split(' ').pop()} VS ${(l.g.home||'').split(' ').pop()}</div>
-      <div class="p-pick" style="color:${l.pc}">${l.pl}</div>
-      <div class="p-conf">信心 ${l.sc}/100</div>
-      <div class="cbar"><div class="cfill" style="width:${l.sc}%;background:${cc}"></div></div>
-    </div>`).join('');
-    return `<div class="p-card"><div class="p-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div class="p-type">${p.t}</div><span class="risk ${rc}">${rl}</span>
-      </div>
-      <div class="p-legs">${lh}</div>
-      <div class="p-foot">
-        <div><div style="font-size:9px;color:var(--dim);margin-bottom:2px">組合賠率</div>
-          <div class="p-odds" style="color:${cc}">${cA}</div></div>
-        <div><div class="p-score" style="color:${cc}">${avgC}</div>
-          <div class="p-slbl">平均信心</div></div>
-      </div>
-      <div class="p-note">${p.note}</div>
-    </div></div>`;
-  }).join('');
-}
-
-window.onload=fetchData;
-</script>
-</body>
-</html>
+@app.get("/stats")
+async def get_stats():
+    docs   = await get_db()["history"].find({"result": {"$in": ["WIN","LOSS","PUSH"]}}).to_list(200)
+    wins   = sum(1 for d in docs if d.get("result") == "WIN")
+    losses = sum(1 for d in docs if d.get("result") == "LOSS")
+    pushes = sum(1 for d in docs if d.get("result") == "PUSH")
+    total  = wins + losses
+    return {
+        "wins": wins, "losses": losses, "pushes": pushes,
+        "total": total + pushes,
+        "win_rate": round(wins / total * 100, 1) if total > 0 else 0,
+        "roi": round((wins * 0.91 - losses) / total * 100, 1) if total > 0 else 0,
+    }
 ENDOFFILE
-echo "done: $(wc -l < /mnt/user-data/outputs/index.html) lines"
-Output
+echo "main.py: $(wc -l < /mnt/user-data/outputs/main.py) lines"
+  
