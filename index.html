@@ -1,3 +1,6 @@
+bash
+
+cat > /mnt/user-data/outputs/main.py << 'ENDOFFILE'
 """
 MLB Pinnacle Tracker v4.1
 - 智慧排程：ET 08:00–23:00 每 30 分鐘抓取，其餘時間睡眠
@@ -425,4 +428,6 @@ async def get_stats():
     }
 ENDOFFILE
 echo "main.py: $(wc -l < /mnt/user-data/outputs/main.py) lines"
-  
+Output
+
+main.py: 425 lines
