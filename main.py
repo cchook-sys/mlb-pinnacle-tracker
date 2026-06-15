@@ -388,38 +388,148 @@ async def get_games():
         })
     return result
 
+
 @app.get("/history")
 async def get_history():
+    """
+    昨日結算 - 只顯示有蒸汽信號（移動 ≥ 0.5）的場次
+    避免把沒有推算依據的場次納入統計
+    """
     yesterday = et_date_str(utc_now() - timedelta(days=1))
     docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time", 1).to_list(30)
     result    = []
     for d in docs:
-        result.append({
-            "game_id":       d["game_id"],
-            "home":          d["home"],
-            "away":          d["away"],
-            "commence_time": d["commence_time"],
-            "date":          d["date"],
-            "open_total":    d.get("open_total"),
-            "close_total":   d.get("close_total"),
-            "total_delta":   d.get("total_delta", 0),
-            "pick":          d.get("pick"),
-            "actual_total":  d.get("actual_total"),
-            "result":        d.get("result"),
-            "signal":        d.get("signal", {}),
-        })
+        delta = abs(d.get("total_delta", 0))
+        pick  = d.get("pick")
+        # 只納入：有蒸汽（移動 ≥ 0.5）且有推算方向的場次
+        if delta >= 0.5 and pick:
+            result.append({
+                "game_id":       d["game_id"],
+                "home":          d["home"],
+                "away":          d["away"],
+                "commence_time": d["commence_time"],
+                "date":          d["date"],
+                "open_total":    d.get("open_total"),
+                "close_total":   d.get("close_total"),
+                "total_delta":   d.get("total_delta", 0),
+                "pick":          pick,
+                "actual_total":  d.get("actual_total"),
+                "result":        d.get("result"),
+                "signal":        d.get("signal", {}),
+            })
     return result
+
+
+@app.get("/corrections")
+async def get_corrections():
+    """
+    昨日推演結果 → 今日修正提示
+    給前端顯示在今日盤口頁面頂部
+    邏輯：
+    - WIN  → 該方向有效，繼續觀察同類信號
+    - LOSS → 提示反向修正
+    - 只看有蒸汽信號的場次
+    """
+    yesterday = et_date_str(utc_now() - timedelta(days=1))
+    docs      = await get_db()["history"].find({
+        "date":   yesterday,
+        "result": {"$in": ["WIN", "LOSS", "PUSH"]},
+    }).to_list(30)
+
+    corrections = []
+    win_patterns  = []
+    loss_patterns = []
+
+    for d in docs:
+        delta = abs(d.get("total_delta", 0))
+        pick  = d.get("pick")
+        if delta < 0.5 or not pick:
+            continue   # 只看蒸汽場次
+
+        result       = d.get("result")
+        actual       = d.get("actual_total")
+        open_total   = d.get("open_total")
+        close_total  = d.get("close_total")
+        away         = (d.get("away") or "").split(" ")[-1]
+        home         = (d.get("home") or "").split(" ")[-1]
+        td           = d.get("total_delta", 0)
+        direction    = "大分蒸汽" if td > 0 else "小分蒸汽"
+
+        if result == "WIN":
+            win_patterns.append(direction)
+            corrections.append({
+                "type":    "WIN",
+                "game":    f"{away} @ {home}",
+                "pick":    pick,
+                "actual":  actual,
+                "delta":   td,
+                "message": f"✅ {direction} 推 {pick} → 實際 {actual} 分，方向正確",
+                "hint":    f"今日遇到{direction}信號可持續參考",
+            })
+        elif result == "LOSS":
+            loss_patterns.append(direction)
+            reverse = "小分" if "大分" in direction else "大分"
+            corrections.append({
+                "type":    "LOSS",
+                "game":    f"{away} @ {home}",
+                "pick":    pick,
+                "actual":  actual,
+                "delta":   td,
+                "message": f"❌ {direction} 推 {pick} → 實際 {actual} 分，推算錯誤",
+                "hint":    f"今日遇到{direction}需謹慎，考慮觀望或反向",
+            })
+        elif result == "PUSH":
+            corrections.append({
+                "type":    "PUSH",
+                "game":    f"{away} @ {home}",
+                "pick":    pick,
+                "actual":  actual,
+                "delta":   td,
+                "message": f"〜 {direction} 推 {pick} → 實際 {actual} 分，壓線平局",
+                "hint":    "壓線場次需注意盤口精確度",
+            })
+
+    # 整體趨勢建議
+    today_hint = "尚無昨日蒸汽記錄"
+    if win_patterns or loss_patterns:
+        win_dirs  = set(win_patterns)
+        loss_dirs = set(loss_patterns)
+        if loss_dirs and not win_dirs:
+            today_hint = f"昨日蒸汽信號全部失準，今日建議提高門檻或觀望"
+        elif win_dirs and not loss_dirs:
+            today_hint = f"昨日蒸汽信號準確，今日同類信號可信度較高"
+        else:
+            today_hint = f"昨日蒸汽有贏有輸，今日嚴格執行「移動停滯才進場」"
+
+    return {
+        "date":        yesterday,
+        "corrections": corrections,
+        "today_hint":  today_hint,
+        "steam_wins":  len(win_patterns),
+        "steam_losses":len(loss_patterns),
+    }
+
 
 @app.get("/stats")
 async def get_stats():
+    # 只統計蒸汽場次（移動 ≥ 0.5）的勝率，才有意義
     docs   = await get_db()["history"].find({"result": {"$in": ["WIN","LOSS","PUSH"]}}).to_list(200)
-    wins   = sum(1 for d in docs if d.get("result") == "WIN")
-    losses = sum(1 for d in docs if d.get("result") == "LOSS")
-    pushes = sum(1 for d in docs if d.get("result") == "PUSH")
-    total  = wins + losses
+    # 全部
+    all_wins   = sum(1 for d in docs if d.get("result") == "WIN")
+    all_losses = sum(1 for d in docs if d.get("result") == "LOSS")
+    all_pushes = sum(1 for d in docs if d.get("result") == "PUSH")
+    all_total  = all_wins + all_losses
+    # 只看蒸汽
+    steam_docs  = [d for d in docs if abs(d.get("total_delta", 0)) >= 0.5]
+    s_wins      = sum(1 for d in steam_docs if d.get("result") == "WIN")
+    s_losses    = sum(1 for d in steam_docs if d.get("result") == "LOSS")
+    s_total     = s_wins + s_losses
     return {
-        "wins": wins, "losses": losses, "pushes": pushes,
-        "total": total + pushes,
-        "win_rate": round(wins / total * 100, 1) if total > 0 else 0,
-        "roi": round((wins * 0.91 - losses) / total * 100, 1) if total > 0 else 0,
+        "all_wins":   all_wins, "all_losses": all_losses, "all_pushes": all_pushes,
+        "all_total":  all_total,
+        "win_rate":   round(all_wins / all_total * 100, 1) if all_total > 0 else 0,
+        "steam_wins": s_wins, "steam_losses": s_losses,
+        "steam_total":s_total,
+        "steam_win_rate": round(s_wins / s_total * 100, 1) if s_total > 0 else 0,
+        "roi":        round((all_wins * 0.91 - all_losses) / all_total * 100, 1) if all_total > 0 else 0,
     }
