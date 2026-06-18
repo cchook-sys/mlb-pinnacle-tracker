@@ -394,7 +394,7 @@ async def get_history():
     """
     昨日結算：
     - 移動 ≥ 0.5 顯示（蒸汽）
-    - 移動 ≥ 1.0 標記為推薦（大蒸汽，真正建議進場）
+    - 移動 ≥ 1.5 標記為推薦（大蒸汽，真正建議進場）
     """
     yesterday = et_date_str(utc_now() - timedelta(days=1))
     docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time", 1).to_list(30)
@@ -416,8 +416,8 @@ async def get_history():
                 "actual_total":  d.get("actual_total"),
                 "result":        d.get("result"),
                 "signal":        d.get("signal", {}),
-                "recommended":   abs(delta) >= 1.0,  # 移動 ≥ 1.0 才是真正推薦
-                "grade":         "⚡ 推薦" if abs(delta) >= 1.0 else "🔥 蒸汽",
+                "recommended":   abs(delta) >= 1.5,  # 移動 ≥ 1.5 才是真正推薦
+                "grade":         "⚡ 推薦" if abs(delta) >= 1.5 else "🔥 蒸汽",
             })
     return result
 
