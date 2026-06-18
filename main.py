@@ -61,10 +61,10 @@ def signal_from_snaps(snaps: list) -> dict:
     if len(valid) < 2:
         return {"total": "FLAT", "ml": "FLAT", "delta": 0}
     td = round(valid[-1]["total"] - valid[0]["total"], 1)
-    ts = ("STEAM_OVER"  if td >= 1.0  else
-          "LEAN_OVER"   if td >= 0.5 else
-          "STEAM_UNDER" if td <= -1.0 else
-          "LEAN_UNDER"  if td <= -0.5 else "FLAT")
+    ts = ("STEAM_OVER"  if td >= 0.5  else
+          "LEAN_OVER"   if td >= 0.25 else
+          "STEAM_UNDER" if td <= -0.5 else
+          "LEAN_UNDER"  if td <= -0.25 else "FLAT")
     mld = (valid[-1].get("ml_home") or 0) - (valid[0].get("ml_home") or 0)
     ms  = ("STEAM_HOME" if mld <= -15 else "STEAM_AWAY" if mld >= 15 else "FLAT")
     return {"total": ts, "ml": ms, "delta": td}
@@ -393,8 +393,8 @@ async def get_games():
 async def get_history():
     """
     昨日結算：
-    - 移動 ≥ 1.0 顯示（蒸汽）
-    - 移動 ≥ 1.5 標記為推薦（大蒸汽，真正建議進場）
+    - 移動 ≥ 0.5 顯示（蒸汽）
+    - 移動 ≥ 1.0 標記為推薦（大蒸汽，真正建議進場）
     """
     yesterday = et_date_str(utc_now() - timedelta(days=1))
     docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time", 1).to_list(30)
@@ -402,7 +402,7 @@ async def get_history():
     for d in docs:
         delta = d.get("total_delta", 0)
         pick  = d.get("pick")
-        if abs(delta) >= 1.0 and pick:
+        if abs(delta) >= 0.5 and pick:
             result.append({
                 "game_id":       d["game_id"],
                 "home":          d["home"],
@@ -416,8 +416,8 @@ async def get_history():
                 "actual_total":  d.get("actual_total"),
                 "result":        d.get("result"),
                 "signal":        d.get("signal", {}),
-                "recommended":   abs(delta) >= 1.5,  # 移動 ≥ 1.5 才是真正推薦
-                "grade":         "⚡ 推薦" if abs(delta) >= 1.5 else "🔥 蒸汽",
+                "recommended":   abs(delta) >= 1.0,  # 移動 ≥ 1.0 才是真正推薦
+                "grade":         "⚡ 推薦" if abs(delta) >= 1.0 else "🔥 蒸汽",
             })
     return result
 
@@ -445,7 +445,7 @@ async def get_corrections():
     for d in docs:
         delta = abs(d.get("total_delta", 0))
         pick  = d.get("pick")
-        if delta < 1.0 or not pick:
+        if delta < 0.5 or not pick:
             continue   # 只看蒸汽場次
 
         result       = d.get("result")
@@ -514,7 +514,7 @@ async def get_corrections():
 
 @app.get("/stats")
 async def get_stats():
-    # 只統計蒸汽場次（移動 ≥ 1.0）的勝率，才有意義
+    # 只統計蒸汽場次（移動 ≥ 0.5）的勝率，才有意義
     docs   = await get_db()["history"].find({"result": {"$in": ["WIN","LOSS","PUSH"]}}).to_list(200)
     # 全部
     all_wins   = sum(1 for d in docs if d.get("result") == "WIN")
@@ -522,7 +522,7 @@ async def get_stats():
     all_pushes = sum(1 for d in docs if d.get("result") == "PUSH")
     all_total  = all_wins + all_losses
     # 只看蒸汽
-    steam_docs  = [d for d in docs if abs(d.get("total_delta", 0)) >= 1.0]
+    steam_docs  = [d for d in docs if abs(d.get("total_delta", 0)) >= 0.5]
     s_wins      = sum(1 for d in steam_docs if d.get("result") == "WIN")
     s_losses    = sum(1 for d in steam_docs if d.get("result") == "LOSS")
     s_total     = s_wins + s_losses
