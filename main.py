@@ -59,21 +59,63 @@ def is_active_hours() -> bool:
 def signal_from_snaps(snaps: list) -> dict:
     valid = [s for s in snaps if s.get("total") is not None]
     if len(valid) < 2:
-        return {"total": "FLAT", "ml": "FLAT", "delta": 0}
-    td = round(valid[-1]["total"] - valid[0]["total"], 1)
-    ts = ("STEAM_OVER"  if td >= 0.5  else
-          "LEAN_OVER"   if td >= 0.25 else
-          "STEAM_UNDER" if td <= -0.5 else
-          "LEAN_UNDER"  if td <= -0.25 else "FLAT")
+        return {"total": "FLAT", "ml": "FLAT", "delta": 0, "ml_delta": 0, "grade": "NONE"}
+
+    td  = round(valid[-1]["total"] - valid[0]["total"], 1)
     mld = (valid[-1].get("ml_home") or 0) - (valid[0].get("ml_home") or 0)
-    ms  = ("STEAM_HOME" if mld <= -15 else "STEAM_AWAY" if mld >= 15 else "FLAT")
-    return {"total": ts, "ml": ms, "delta": td}
+
+    # 大小分信號（新門檻）
+    # ⚡ 推薦 ≥ 2.0 · 🔥 蒸汽 1.0–1.9 · 小蒸汽 0.5–0.9
+    abs_td = abs(td)
+    if abs_td >= 2.0:
+        ts    = "RECOMMEND_OVER"  if td > 0 else "RECOMMEND_UNDER"
+        grade = "RECOMMEND"
+    elif abs_td >= 1.0:
+        ts    = "STEAM_OVER"  if td > 0 else "STEAM_UNDER"
+        grade = "STEAM"
+    elif abs_td >= 0.5:
+        ts    = "LEAN_OVER"  if td > 0 else "LEAN_UNDER"
+        grade = "LEAN"
+    elif abs_td >= 0.25:
+        ts    = "WATCH_OVER"  if td > 0 else "WATCH_UNDER"
+        grade = "WATCH"
+    else:
+        ts    = "FLAT"
+        grade = "FLAT"
+
+    # 獨贏信號（ML 移動 ≥ 15）
+    # ml_home 變小（負向）= 主隊賠率縮水 = 資金押客隊 = 客隊蒸汽
+    # ml_home 變大（正向）= 主隊賠率變好 = 資金押主隊 = 主隊蒸汽
+    if mld <= -15:
+        ms = "STEAM_HOME"   # 主隊賠率縮水，鯊魚押客隊
+    elif mld >= 15:
+        ms = "STEAM_AWAY"   # 主隊賠率變大，鯊魚押主隊（反直覺）
+    else:
+        ms = "FLAT"
+
+    return {
+        "total":    ts,
+        "ml":       ms,
+        "delta":    td,
+        "ml_delta": round(mld),
+        "grade":    grade,   # RECOMMEND / STEAM / LEAN / WATCH / FLAT
+    }
 
 def pick_from_signal(sig, game):
     d     = sig.get("delta", 0)
-    total = game.get("latest", {}).get("total")
-    if d >= 0.25:  return f"OVER {total}"
-    if d <= -0.25: return f"UNDER {total}"
+    grade = sig.get("grade", "FLAT")
+    total = (game.get("latest") or {}).get("total")
+    ml_h  = (game.get("latest") or {}).get("ml_home")
+    ml_a  = (game.get("latest") or {}).get("ml_away")
+    home  = (game.get("home") or "").split()[-1]
+    away  = (game.get("away") or "").split()[-1]
+
+    # 只有蒸汽以上才推算方向
+    if grade not in ("RECOMMEND", "STEAM"):
+        return None
+
+    if d >= 1.0:   return f"OVER {total}"
+    if d <= -1.0:  return f"UNDER {total}"
     return None
 
 # ── Fetch Odds ────────────────────────────────────────────────────────────────
@@ -220,7 +262,12 @@ async def fetch_and_settle():
             except Exception:
                 continue
 
-            game_doc = await snaps_col.find_one({"game_id": s["id"], "date": yesterday})
+            # 修正時區對齊：用比賽開賽時間的 ET 日期來查詢，不用固定 yesterday
+            game_et_date = et_date_str(datetime.fromisoformat(s["commence_time"].replace("Z","+00:00")))
+            game_doc = await snaps_col.find_one({"game_id": s["id"], "date": game_et_date})
+            if not game_doc:
+                # fallback：用 yesterday
+                game_doc = await snaps_col.find_one({"game_id": s["id"], "date": yesterday})
             if not game_doc:
                 game_doc = await snaps_col.find_one({"game_id": s["id"]})
             if not game_doc:
@@ -236,23 +283,26 @@ async def fetch_and_settle():
                 if "OVER"  in pick: result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
                 if "UNDER" in pick: result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
 
+            settle_date = game_doc.get("date", yesterday)
             entry = {
                 "game_id":       s["id"],
-                "date":          yesterday,
+                "date":          settle_date,
                 "home":          game_doc["home"],
                 "away":          game_doc["away"],
                 "commence_time": game_doc["commence_time"],
                 "open_total":    total,
                 "close_total":   (game_doc.get("latest") or {}).get("total"),
                 "total_delta":   sig.get("delta", 0),
+                "ml_delta":      sig.get("ml_delta", 0),
                 "signal":        sig,
+                "grade":         sig.get("grade", "FLAT"),
                 "pick":          pick,
                 "actual_total":  total_runs,
                 "result":        result,
                 "settled_at":    ts,
             }
             await hist_col.update_one(
-                {"game_id": s["id"], "date": yesterday},
+                {"game_id": s["id"], "date": settle_date},
                 {"$set": entry},
                 upsert=True
             )
@@ -370,6 +420,16 @@ async def get_games():
                 "ml_home":     s.get("ml_home"),
                 "ml_away":     s.get("ml_away"),
             })
+
+        # ML 方向解讀
+        ml_signal = sig.get("ml", "FLAT")
+        ml_delta  = sig.get("ml_delta", 0)
+        ml_hint   = None
+        if ml_signal == "STEAM_HOME":
+            ml_hint = f"鯊魚押客隊（主隊ML縮水 {ml_delta:+d}）"
+        elif ml_signal == "STEAM_AWAY":
+            ml_hint = f"鯊魚押主隊（主隊ML變大 {ml_delta:+d}）"
+
         result.append({
             "game_id":        d["game_id"],
             "home":           d["home"],
@@ -380,8 +440,9 @@ async def get_games():
             "latest":  {"total": last.get("total"),  "over_juice": last.get("over_juice"),
                         "under_juice": last.get("under_juice"), "ml_home": last.get("ml_home"),
                         "ml_away": last.get("ml_away"), "spread_home": last.get("spread_home")},
-            "delta":   {"total": sig["delta"]},
-            "signal":  {"total": sig["total"], "ml": sig["ml"]},
+            "delta":   {"total": sig["delta"], "ml": ml_delta},
+            "signal":  {"total": sig["total"], "ml": ml_signal, "grade": sig.get("grade","FLAT")},
+            "ml_hint": ml_hint,
             "history": hist,
             "result":        d.get("result"),
             "actual_total":  d.get("actual_total"),
@@ -394,7 +455,7 @@ async def get_history():
     """
     昨日結算：
     - 移動 ≥ 0.5 顯示（蒸汽）
-    - 移動 ≥ 1.5 標記為推薦（大蒸汽，真正建議進場）
+    - 移動 ≥ 1.0 標記為推薦（大蒸汽，真正建議進場）
     """
     yesterday = et_date_str(utc_now() - timedelta(days=1))
     docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time", 1).to_list(30)
@@ -416,8 +477,8 @@ async def get_history():
                 "actual_total":  d.get("actual_total"),
                 "result":        d.get("result"),
                 "signal":        d.get("signal", {}),
-                "recommended":   abs(delta) >= 1.5,  # 移動 ≥ 1.5 才是真正推薦
-                "grade":         "⚡ 推薦" if abs(delta) >= 1.5 else "🔥 蒸汽",
+                "recommended":   abs(delta) >= 1.0,  # 移動 ≥ 1.0 才是真正推薦
+                "grade":         "⚡ 推薦" if abs(delta) >= 1.0 else "🔥 蒸汽",
             })
     return result
 
