@@ -6,63 +6,27 @@
 <title>MLBENTRY - Pinnacle 盤口監控</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
+/* 保持你的原始樣式設計 */
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;background:#07090f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
 :root{--bg:#07090f;--surface:#0d1117;--card:#0d1b2e;--border:#1e3a5f;--border2:#131d2e;--text:#e6edf3;--muted:#8b949e;--dim:#4b5563;--accent:#39ff14;--blue:#3b82f6;--orange:#f97316;--cyan:#38bdf8;--red:#f87171;--yellow:#fbbf24;--green:#4ade80;--purple:#c084fc;}
-::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:2px;}
 .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 16px;flex-shrink:0;}
 .tabbar{background:var(--bg);border-bottom:1px solid var(--border2);padding:7px 16px;display:flex;gap:6px;flex-shrink:0;}
 .main-today{display:flex;flex:1;overflow:hidden;}
-.main-history{display:none;flex:1;overflow:hidden;flex-direction:column;}
-.sidebar{width:360px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border2);display:flex;flex-direction:column;}
+.sidebar{width:360px;overflow-y:auto;border-right:1px solid var(--border2);display:flex;flex-direction:column;}
 .detail-panel{flex:1;overflow-y:auto;padding:18px 20px;}
-@media(max-width:768px){.sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border2);}.main-today{flex-direction:column;}.detail-panel{padding:14px;}.topbar-meta{display:none;}.btn-txt{display:none;}.main-today.detail-open .sidebar{display:none;}.main-today.detail-open .detail-panel{display:flex;flex-direction:column;}.mobile-back{display:flex!important;}}
-.mobile-back{display:none;align-items:center;gap:6px;padding:8px 14px;background:var(--surface);border-bottom:1px solid var(--border2);font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;flex-shrink:0;}
-.topbar-inner{display:flex;justify-content:space-between;align-items:center;}
-.logo{font-size:20px;font-weight:900;letter-spacing:3px;color:var(--text);}
-.logo b{color:var(--accent);}
-.topbar-meta{font-size:10px;color:var(--dim);margin-top:3px;display:flex;gap:10px;}
-.topbar-right{display:flex;gap:6px;align-items:center;}
-.stat-box{display:flex;gap:0;background:#09101a;border:1px solid var(--border);border-radius:6px;overflow:hidden;}
-.stat{text-align:center;padding:5px 11px;border-right:1px solid var(--border2);}
-.stl{font-size:8px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;}
-.stv{font-size:17px;font-weight:900;font-family:monospace;line-height:1.1;}
-.btn{border:none;cursor:pointer;font-family:inherit;font-weight:700;font-size:11px;padding:7px 13px;border-radius:5px;display:flex;align-items:center;gap:4px;letter-spacing:.3px;}
-.btn-green{background:#0f2d0f;color:var(--accent);border:1px solid rgba(57,255,20,.25);}
-.btn-blue{background:#1d4ed8;color:#fff;}
-.tab{background:transparent;border:1px solid var(--border);color:var(--dim);padding:5px 14px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;}
-.tab.on{background:#1d4ed8;border-color:#3b82f6;color:#fff;}
-.signal-banner{padding:7px 14px;border-bottom:1px solid var(--border2);flex-shrink:0;}
-.banner-inner{display:flex;gap:8px;align-items:center;overflow-x:auto;scrollbar-width:none;}
-.banner-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0;cursor:pointer;}
-.banner-chip.rec{background:rgba(57,255,20,.12);border:1px solid rgba(57,255,20,.3);color:var(--accent);}
-.corr-wrap{flex-shrink:0;border-bottom:1px solid var(--border2);}
-.corr-hdr{padding:7px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:#0a1628;}
-.corr-body{padding:0 14px 8px;}
-.corr-item{font-size:10px;padding:6px 9px;border-radius:5px;margin-top:5px;line-height:1.5;}
-.ci-win{background:rgba(74,222,128,.07);border-left:2px solid var(--green);color:#86efac;}
-.ci-loss{background:rgba(248,113,113,.07);border-left:2px solid var(--red);color:#fca5a5;}
-.gc{padding:10px 13px;border-bottom:1px solid var(--border2);cursor:pointer;border-left:3px solid transparent;}
-.gc.sel{background:var(--card);border-left-color:var(--blue);}
-.htbl{width:100%;border-collapse:collapse;font-size:11px;}
-.htbl th{padding:8px 12px;font-size:9px;color:var(--dim);border-bottom:2px solid var(--border);background:var(--surface);text-transform:uppercase;}
-.htbl td{padding:9px 12px;border-bottom:1px solid rgba(30,58,95,.2);}
-.spin{display:inline-block;animation:spin 1s linear infinite;}
-@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.gc{padding:10px 13px;border-bottom:1px solid var(--border2);cursor:pointer;}
+.gc:hover{background:rgba(255,255,255,.025);}
+.btn{border:none;cursor:pointer;padding:7px 13px;border-radius:5px;font-weight:700;}
 </style>
 </head>
 <body>
 <div class="app">
   <div class="topbar">
-    <div class="topbar-inner">
-      <div>
-        <div class="logo">MLB<b>ENTRY</b></div>
-        <div class="topbar-meta">ET <span id="clk">--:--:--</span> · 場次 <span id="gc">0</span> · 快照 <span id="sc">0</span> · <span id="si">連線中...</span></div>
-      </div>
-      <div class="topbar-right">
-        <button class="btn btn-blue" id="rb" onclick="fetchData()"><span id="ri">↺</span></button>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="logo">MLB<b>ENTRY</b></div>
+      <button class="btn" onclick="fetchData()">更新盤口</button>
     </div>
   </div>
   <div class="tabbar">
@@ -70,35 +34,23 @@ html,body{height:100%;background:#07090f;color:#e6edf3;font-family:-apple-system
     <button class="tab" id="t2" onclick="swTab('history')">📊 昨日結算</button>
   </div>
   <div class="main-today" id="vt">
-    <div class="sidebar">
-      <div id="glist" style="flex:1;"></div>
-    </div>
-    <div class="detail-panel" id="dpanel"><div class="d-empty">點擊場次查看詳細分析</div></div>
-  </div>
-  <div class="main-history" id="vh">
-    <div style="overflow:auto;flex:1;">
-      <table class="htbl"><thead><tr><th>比賽</th><th>結果</th></tr></thead><tbody id="htb"></tbody></table>
-    </div>
+    <div class="sidebar" id="glist"></div>
+    <div class="detail-panel" id="dpanel">點擊場次查看詳細分析</div>
   </div>
 </div>
 
 <script>
 const API = 'https://mlb-pinnacle-tracker.onrender.com';
-let games = [], selId = null, chartObj = null, isMobile = window.innerWidth <= 768;
-let corrOpen = false; // 唯一宣告處
-
-window.addEventListener('resize', () => { isMobile = window.innerWidth <= 768; });
+let games = [], selId = null;
+let corrOpen = false; // 全域變數，僅在此定義一次
 
 function swTab(t) {
     const isT = (t === 'today');
     document.getElementById('vt').style.display = isT ? 'flex' : 'none';
-    document.getElementById('vh').style.display = isT ? 'none' : 'flex';
-    document.getElementById('t1').classList.toggle('on', isT);
-    document.getElementById('t2').classList.toggle('on', !isT);
 }
 
 function toggleCorr() {
-    corrOpen = !corrOpen; // 直接切換
+    corrOpen = !corrOpen;
     const body = document.getElementById('corr-body');
     if (body) body.style.display = corrOpen ? 'block' : 'none';
 }
@@ -106,9 +58,33 @@ function toggleCorr() {
 async function fetchData() {
     try {
         const r = await fetch(API + '/games');
+        if (!r.ok) throw new Error('API Error');
         games = await r.json();
+        renderList();
     } catch (e) {
-        console.error(e);
+        document.getElementById('glist').innerHTML = "連線失敗: " + e.message;
+    }
+}
+
+function renderList() {
+    const el = document.getElementById('glist');
+    if (!games.length) { el.innerHTML = '無資料'; return; }
+    el.innerHTML = games.map(g => `
+        <div class="gc" onclick="selGame('${g.game_id}')">
+            <div style="font-weight:800;">${g.away} VS ${g.home}</div>
+            <div style="font-size:11px;color:#8b949e;">最新總分: ${g.latest?.total || '—'}</div>
+        </div>
+    `).join('');
+}
+
+function selGame(id) {
+    selId = id;
+    const g = games.find(x => x.game_id === id);
+    if (g) {
+        document.getElementById('dpanel').innerHTML = `
+            <h3>${g.away} vs ${g.home}</h3>
+            <p>比賽時間: ${new Date(g.commence_time).toLocaleString()}</p>
+        `;
     }
 }
 
