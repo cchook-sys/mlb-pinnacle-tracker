@@ -369,40 +369,84 @@ function starRating(n){
 
 // ── SIGNAL ──────────────────────────────────────────────────────────────────
 function calcSig(snaps, mlHint, signalData){
-  const grade=signalData?.grade||'FLAT';
   const mlSig=signalData?.ml||'FLAT';
-  if(!snaps||snaps.length<2) return{lbl:'觀望',d:0,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint};
+  if(!snaps||snaps.length<2) return{lbl:'觀望',d:0,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk:false};
+
   const d=+(snaps[snaps.length-1].total-snaps[0].total).toFixed(1);
   const a=Math.abs(d);
-  if(a>=2.0) return{lbl:d>0?'⚡ 大分推薦':'⚡ 小分推薦',d,st:true,col:d>0?'#39ff14':'#22d3ee',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:true,grade:'RECOMMEND',mlSig,mlHint};
-  if(a>=1.0) return{lbl:d>0?'🔥 大分蒸汽':'🔥 小分蒸汽',d,st:true,col:d>0?'#f97316':'#38bdf8',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:false,grade:'STEAM',mlSig,mlHint};
-  if(a>=0.5) return{lbl:d>0?'↑ 小蒸汽(大)':'↓ 小蒸汽(小)',d,st:false,col:d>0?'#fb923c':'#7dd3fc',pick:null,cls:'',rec:false,grade:'LEAN',mlSig,mlHint};
-  return{lbl:'觀望',d,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint};
+  const snapOk=snaps.length>=3; // 改良1：快照 < 3 不給建議
+
+  // 信號等級（門檻不變，但 snapOk 控制是否給建議）
+  if(a>=2.0) return{lbl:d>0?'⚡ 大分推薦':'⚡ 小分推薦',d,st:true,col:d>0?'#39ff14':'#22d3ee',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:true,grade:'RECOMMEND',mlSig,mlHint,snapOk};
+  if(a>=1.0) return{lbl:d>0?'🔥 大分蒸汽':'🔥 小分蒸汽',d,st:true,col:d>0?'#f97316':'#38bdf8',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:false,grade:'STEAM',mlSig,mlHint,snapOk};
+  if(a>=0.5) return{lbl:d>0?'↑ 小蒸汽(大)':'↓ 小蒸汽(小)',d,st:false,col:d>0?'#fb923c':'#7dd3fc',pick:null,cls:'',rec:false,grade:'LEAN',mlSig,mlHint,snapOk};
+  return{lbl:'觀望',d,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk};
 }
 
 // ── ENTRY & BET SUGGESTION ──────────────────────────────────────────────────
 function calcEnt(snaps, mins, s, g){
-  if(mins<=0) return{lbl:'進行中',rdy:false,totalBet:null,mlBet:null};
-  if(mins<20) return{lbl:'已過期',rdy:false,totalBet:null,mlBet:null};
+  if(mins<=0) return{lbl:'進行中',rdy:false,totalBet:null,mlBet:null,reason:null};
+  if(mins<20) return{lbl:'已過期', rdy:false,totalBet:null,mlBet:null,reason:null};
+
+  // 改良1：快照不足，給出提示但不建議進場
+  if(!s.snapOk){
+    return{lbl:'觀察中',rdy:false,totalBet:null,mlBet:null,reason:`快照僅 ${snaps.length} 筆，需 ≥3 筆才給建議`};
+  }
 
   const cur=snaps.length?snaps[snaps.length-1].total:null;
+
+  // 改良2：連續 3 筆都 < 0.1 才算真正停滯（而非只看最後兩筆）
   let settled=true;
+  let settledCount=0;
   if(snaps.length>=2){
-    if(Math.abs(snaps[snaps.length-1].total-snaps[snaps.length-2].total)>=0.1) settled=false;
+    // 從最新往前看，連續幾筆沒有變動
+    for(let i=snaps.length-1;i>=1;i--){
+      const diff=Math.abs(snaps[i].total-snaps[i-1].total);
+      if(diff<0.1) settledCount++;
+      else break;
+    }
+    // 需要連續 2 筆以上沒動才算停滯（最近3筆快照都沒變）
+    if(settledCount<2) settled=false;
   }
+
+  // 改良3：開賽時間加權
+  // 距開賽 2–8 小時 = 最佳窗口（加分）
+  // 距開賽 > 12 小時 = 太早，信號可能被抵消（降級）
+  // 距開賽 < 2 小時 = 太晚，風險高
+  let timeGrade='ok'; // ok / early / late
+  if(mins>720)      timeGrade='early'; // 12 小時以上
+  else if(mins>480) timeGrade='watch'; // 8–12 小時
+  else if(mins>=120&&mins<=480) timeGrade='best'; // 2–8 小時最佳
+  else if(mins>=20&&mins<120)  timeGrade='late';  // 20 分–2 小時
 
   // 大小分建議
   let totalBet=null;
-  if(s.grade==='RECOMMEND'){
-    totalBet={label:s.d>0?`押大分 Over ${cur}`:` 押小分 Under ${cur}`,col:s.col,grade:'⚡ 推薦',settled};
-  } else if(s.grade==='STEAM'){
-    totalBet={label:s.d>0?`押大分 Over ${cur}`:`押小分 Under ${cur}`,col:s.col,grade:'🔥 蒸汽',settled};
+  if(s.grade==='RECOMMEND'||s.grade==='STEAM'){
+    // 太早（>12h）時只顯示觀察，不給進場建議
+    if(timeGrade==='early'){
+      totalBet={
+        label: s.d>0?`大分 Over ${cur} 方向`:`小分 Under ${cur} 方向`,
+        col: s.col, grade: s.rec?'⚡ 推薦':'🔥 蒸汽',
+        settled, timeNote:'距開賽超過 12 小時，建議持續觀察',
+        earlyOnly: true, // 太早，不觸發進場
+      };
+    } else {
+      totalBet={
+        label: s.d>0?`押大分 Over ${cur}`:`押小分 Under ${cur}`,
+        col: s.col, grade: s.rec?'⚡ 推薦':'🔥 蒸汽',
+        settled,
+        timeNote: timeGrade==='best'?'⭐ 最佳進場窗口（2–8小時）'
+                 :timeGrade==='late'?'⚠ 距開賽較近，注意流動性'
+                 :'距開賽 8–12 小時，可持續觀察',
+        earlyOnly: false,
+      };
+    }
   }
 
   // 獨贏建議
   let mlBet=null;
   const mlSig=s.mlSig||'FLAT';
-  if(g && mlSig!=='FLAT'){
+  if(g&&mlSig!=='FLAT'){
     const home=(g.home||'').split(' ').pop();
     const away=(g.away||'').split(' ').pop();
     const mlD=g.delta?.ml||0;
@@ -414,9 +458,16 @@ function calcEnt(snaps, mins, s, g){
   }
 
   const hasBet=totalBet||mlBet;
-  if(!hasBet) return{lbl:'觀望',rdy:false,totalBet,mlBet};
-  if(totalBet&&!settled) return{lbl:'等待停滯',rdy:false,totalBet,mlBet};
-  return{lbl:'進場',rdy:true,totalBet,mlBet};
+  if(!hasBet) return{lbl:'觀望',rdy:false,totalBet,mlBet,reason:null};
+
+  // 太早 → 觀察中，不進場
+  if(totalBet?.earlyOnly) return{lbl:'觀察中',rdy:false,totalBet,mlBet,reason:totalBet.timeNote};
+
+  // 有信號但移動中（未停滯）
+  if(totalBet&&!settled) return{lbl:'等待停滯',rdy:false,totalBet,mlBet,reason:`需連續 2 筆快照不變動才確認停滯（目前連續 ${settledCount} 筆）`};
+
+  // 可進場
+  return{lbl:'進場',rdy:true,totalBet,mlBet,reason:totalBet?.timeNote||null};
 }
 
 // ── TREND TEXT ──────────────────────────────────────────────────────────────
@@ -566,8 +617,8 @@ function renderList(){
     }
 
     // btn
-    const btnCls=e.rdy?'gc-btn-enter':e.totalBet&&!e.totalBet?.settled?'gc-btn-wait':'gc-btn-watch';
-    const btnTxt=e.rdy?'🔥 進場':e.totalBet&&!e.totalBet?.settled?'⏳ 等待':'🚀 觀望';
+    const btnCls=e.rdy?'gc-btn-enter':e.lbl==='等待停滯'?'gc-btn-wait':e.lbl==='觀察中'?'gc-btn-wait':'gc-btn-watch';
+    const btnTxt=e.rdy?'🔥 進場':e.lbl==='等待停滯'?'⏳ 等待':e.lbl==='觀察中'?'👁 觀察中':'🚀 觀望';
 
     return `<div class="${cls}" onclick="selGame('${g.game_id}')">
       <div class="gc-r1">
@@ -642,9 +693,11 @@ function renderDetail(g){
         ${secBet?`<div style="font-size:12px;font-weight:700;color:${secBet.col};margin-top:4px;">+ 🦈 ${secBet.label}</div>`:''}
         ${e.totalBet?`<div class="cb-sub">${trend?trend.txt:''}</div>`:''}
         ${e.mlBet&&!e.totalBet?`<div class="cb-sub">${e.mlBet.hint}</div>`:''}
-        <div class="cb-status" style="color:${e.rdy?'#4ade80':e.lbl==='等待停滯'?'#fbbf24':'#94a3b8'};">
-          ${e.rdy?'✓ 移動已停滯，可進場':e.lbl==='等待停滯'?'⏳ 盤口仍在移動，等停滯後進場':'— '+e.lbl}
+        <div class="cb-status" style="color:${e.rdy?'#4ade80':e.lbl==='等待停滯'?'#fbbf24':e.lbl==='觀察中'?'#94a3b8':'#94a3b8'};">
+          ${e.rdy?'✓ 移動已停滯，可進場':e.lbl==='等待停滯'?'⏳ 盤口仍在移動，等停滯後進場':e.lbl==='觀察中'?'👁 '+e.reason:'— '+e.lbl}
         </div>
+        ${e.reason&&e.rdy?`<div style="font-size:10px;color:#4ade80;margin-top:4px;">${e.reason}</div>`:''}
+        ${e.lbl==='等待停滯'&&e.reason?`<div style="font-size:10px;color:#fbbf24;margin-top:4px;">${e.reason}</div>`:''}
       </div>`;
   }
 
