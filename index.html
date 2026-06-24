@@ -484,57 +484,6 @@ function calcEnt(snaps, mins, s, g){
   return{lbl:'進場',rdy:true,totalBet,mlBet,reason:totalBet?.timeNote||null};
 }
 
-  // 大小分建議
-  let totalBet=null;
-  if(s.grade==='RECOMMEND'||s.grade==='STEAM'){
-    // 太早（>12h）時只顯示觀察，不給進場建議
-    if(timeGrade==='early'){
-      totalBet={
-        label: s.d>0?`大分 Over ${cur} 方向`:`小分 Under ${cur} 方向`,
-        col: s.col, grade: s.rec?'⚡ 推薦':'🔥 蒸汽',
-        settled, timeNote:'距開賽超過 12 小時，建議持續觀察',
-        earlyOnly: true, // 太早，不觸發進場
-      };
-    } else {
-      totalBet={
-        label: s.d>0?`押大分 Over ${cur}`:`押小分 Under ${cur}`,
-        col: s.col, grade: s.rec?'⚡ 推薦':'🔥 蒸汽',
-        settled,
-        timeNote: timeGrade==='best'?'⭐ 最佳進場窗口（2–8小時）'
-                 :timeGrade==='late'?'⚠ 距開賽較近，注意流動性'
-                 :'距開賽 8–12 小時，可持續觀察',
-        earlyOnly: false,
-      };
-    }
-  }
-
-  // 獨贏建議
-  let mlBet=null;
-  const mlSig=s.mlSig||'FLAT';
-  if(g&&mlSig!=='FLAT'){
-    const home=(g.home||'').split(' ').pop();
-    const away=(g.away||'').split(' ').pop();
-    const mlD=g.delta?.ml||0;
-    if(mlSig==='STEAM_HOME'){
-      mlBet={label:`押客隊 ${away} 獨贏`,col:'#c084fc',hint:`主隊賠率縮水 ${mlD}，鯊魚資金押客隊`};
-    } else if(mlSig==='STEAM_AWAY'){
-      mlBet={label:`押主隊 ${home} 獨贏`,col:'#4ade80',hint:`主隊賠率上升 +${mlD}，鯊魚資金押主隊`};
-    }
-  }
-
-  const hasBet=totalBet||mlBet;
-  if(!hasBet) return{lbl:'觀望',rdy:false,totalBet,mlBet,reason:null};
-
-  // 太早 → 觀察中，不進場
-  if(totalBet?.earlyOnly) return{lbl:'觀察中',rdy:false,totalBet,mlBet,reason:totalBet.timeNote};
-
-  // 有信號但移動中（未停滯）
-  if(totalBet&&!settled) return{lbl:'等待停滯',rdy:false,totalBet,mlBet,reason:`需連續 2 筆快照不變動才確認停滯（目前連續 ${settledCount} 筆）`};
-
-  // 可進場
-  return{lbl:'進場',rdy:true,totalBet,mlBet,reason:totalBet?.timeNote||null};
-}
-
 // ── TREND TEXT ──────────────────────────────────────────────────────────────
 function trendText(snaps, s, g){
   if(!snaps||snaps.length<2) return null;
