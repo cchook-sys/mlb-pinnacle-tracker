@@ -284,6 +284,23 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 /* SNAP PROGRESS BAR */
 .snap-progress{height:2px;background:var(--border);border-radius:1px;margin-top:3px;overflow:hidden;}
 .snap-fill{height:100%;border-radius:1px;transition:width .4s ease;}
+/* COMPACT MODE */
+.compact .gc-date{display:none!important;}
+.compact .snap-progress{display:none!important;}
+.compact>div>div[style*="margin-bottom:3px"]{display:none!important;}
+.compact>div{padding:6px 12px!important;}
+
+/* HOT GLOW（最熱場次前3名） */
+.gc-hot{box-shadow:0 0 14px rgba(239,68,68,.3);border-left-color:#ef4444!important;}
+.gc-hot-badge{display:inline-block;font-size:8px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(239,68,68,.15);color:#ff7b72;border:1px solid rgba(239,68,68,.35);animation:blink .8s ease-in-out infinite;margin-left:4px;}
+
+/* COPY BTN */
+.copy-btn{font-size:10px;font-weight:700;padding:3px 9px;border-radius:4px;border:1px solid #30363d;background:transparent;color:#545d68;cursor:pointer;font-family:inherit;transition:all .15s;}
+.copy-btn:hover{border-color:#58a6ff;color:#58a6ff;}
+.copy-btn.ok{border-color:#56d364!important;color:#56d364!important;}
+
+/* SOUND INDICATOR */
+.sound-on{color:#56d364!important;border-color:rgba(86,211,100,.4)!important;}
 </style>
 </head>
 <body>
@@ -339,7 +356,11 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
       <button class="fchip rec"   id="f-rec"    onclick="setFilter('rec')">⚡ 推薦</button>
       <button class="fchip steam" id="f-steam"  onclick="setFilter('steam')">🔥 蒸汽</button>
       <button class="fchip ml"    id="f-ml"     onclick="setFilter('ml')">🦈 獨贏</button>
-      <button class="fchip"       id="f-hide0"  onclick="setFilter('hide0')" style="margin-left:auto;">隱藏無信號</button>
+      <div style="margin-left:auto;display:flex;gap:4px;">
+        <button class="fchip" id="f-sort" onclick="toggleSort()" title="按移動幅度排序">🔥 排序</button>
+        <button class="fchip" id="f-compact" onclick="toggleCompact()" title="緊湊模式">▤</button>
+        <button class="fchip" id="f-sound" onclick="toggleSound()" title="異動提示音">🔇</button>
+      </div>
     </div>
     <!-- CORRECTION -->
     <div class="corr-wrap" id="corr-wrap" style="display:none;">
@@ -416,8 +437,97 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 <script>
 const API='https://mlb-pinnacle-tracker.onrender.com';
 let games=[],selId=null,chartObj=null,corrOpen=false,isMobile=window.innerWidth<=768;
-let currentFilter='all'; // all / rec / steam / ml / hide0
+let currentFilter='all';
+let sortByDelta=false;
+let compactMode=false;
+let soundEnabled=false;
+let prevDeltaMap={};  // track previous deltas for sound alert
 let lastUpdateTime=null;
+
+// ── SORT TOGGLE ───────────────────────────────────────────────────────────────
+function toggleSort(){
+  sortByDelta=!sortByDelta;
+  const btn=document.getElementById('f-sort');
+  btn.classList.toggle('active',sortByDelta);
+  btn.textContent=sortByDelta?'🔥 熱度↓':'🔥 排序';
+  renderList();
+}
+
+// ── COMPACT MODE ──────────────────────────────────────────────────────────────
+function toggleCompact(){
+  compactMode=!compactMode;
+  const btn=document.getElementById('f-compact');
+  btn.classList.toggle('active',compactMode);
+  btn.textContent=compactMode?'▤ 緊湊':'▤';
+  renderList();
+}
+
+// ── SOUND ALERT ───────────────────────────────────────────────────────────────
+function toggleSound(){
+  soundEnabled=!soundEnabled;
+  const btn=document.getElementById('f-sound');
+  btn.textContent=soundEnabled?'🔊':'🔇';
+  btn.classList.toggle('sound-on',soundEnabled);
+  if(soundEnabled) playBeep(440,0.1); // test beep
+}
+
+function playBeep(freq=660, vol=0.15, dur=0.15){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const osc=ctx.createOscillator();
+    const gain=ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value=freq;
+    osc.type='sine';
+    gain.gain.setValueAtTime(vol,ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
+    osc.start(); osc.stop(ctx.currentTime+dur);
+  }catch(_){}
+}
+
+function checkSoundAlerts(){
+  if(!soundEnabled) return;
+  games.forEach(g=>{
+    const snaps=(g.history||[]).filter(s=>s.total!=null);
+    const s=calcSig(snaps,g.ml_hint,g.signal);
+    const prevD=prevDeltaMap[g.game_id]||0;
+    // 新出現蒸汽或推薦信號
+    if(Math.abs(s.d)>=1.0 && Math.abs(prevD)<1.0){
+      playBeep(660,0.2,0.3);
+      setTimeout(()=>playBeep(880,0.15,0.2),350);
+    }
+    // 新出現推薦信號（更強提示）
+    if(s.rec && Math.abs(prevD)<1.5){
+      setTimeout(()=>{playBeep(880,0.2,0.2);setTimeout(()=>playBeep(1100,0.15,0.3),250);},100);
+    }
+    prevDeltaMap[g.game_id]=s.d;
+  });
+}
+
+// ── COPY GAME DATA ────────────────────────────────────────────────────────────
+function copyGameData(g, e){
+  const snaps=(g.history||[]).filter(s=>s.total!=null);
+  const s=calcSig(snaps,g.ml_hint,g.signal);
+  const ent=calcEnt(snaps,mu(g.commence_time),s,g);
+  const cur=snaps.length?snaps[snaps.length-1].total:g.latest?.total;
+  const home=(g.home||'').split(' ').pop();
+  const away=(g.away||'').split(' ').pop();
+  const mins=mu(g.commence_time);
+  const ttg=timeToGame(mins);
+  const bet=ent.totalBet||ent.mlBet;
+  const txt=`📊 MLB Pinnacle 盤口信號
+⚾ ${away} VS ${home}
+🕐 ${fet(g.commence_time)} ET · ${ttg.txt}
+📈 大小分: ${cur??'—'} (移動 ${s.d>0?'+':''}${s.d})
+${s.mlSig!=='FLAT'?`🦈 獨贏: ${g.ml_hint||''}` :''}
+${bet?`📌 建議: ${bet.label}`:'📌 建議: 盤口穩定，觀望'}
+${ent.rdy?'✅ 可進場':'⏳ '+ent.lbl}
+— MLB Pinnacle Tracker`;
+  navigator.clipboard.writeText(txt).then(()=>{
+    if(e){e.textContent='✓ 已複製';e.classList.add('ok');setTimeout(()=>{e.textContent='複製';e.classList.remove('ok');},2000);}
+  }).catch(()=>{});
+  if(e) e.stopPropagation?.();
+}
 
 // resize
 window.addEventListener('resize',()=>{ isMobile=window.innerWidth<=768; });
@@ -684,6 +794,7 @@ async function fetchData(){
     calcStats();
     renderBanner();
     renderList();
+    checkSoundAlerts();
     if(selId){const g=games.find(g=>g.game_id===selId);if(g)renderDetail(g);}
     fetchStats();
     fetchCorrections();
@@ -755,24 +866,42 @@ function renderList(){
     const e=calcEnt(snaps,mu(g.commence_time),s,g);
     return passFilter(s,e);
   });
-  const hiddenCount=games.length-filtered.length;
 
+  // Sort by delta magnitude if enabled
+  const displayGames=sortByDelta
+    ? [...filtered].sort((a,b)=>{
+        const sa=(a.history||[]).filter(s=>s.total!=null);
+        const sb=(b.history||[]).filter(s=>s.total!=null);
+        return Math.abs(calcSig(sb,b.ml_hint,b.signal).d) - Math.abs(calcSig(sa,a.ml_hint,a.signal).d);
+      })
+    : filtered;
+
+  // Top 3 hottest games by delta (for glow effect)
+  const hotIds=new Set(
+    [...games].map(g=>{
+      const snaps=(g.history||[]).filter(s=>s.total!=null);
+      return {id:g.game_id, d:Math.abs(calcSig(snaps,g.ml_hint,g.signal).d)};
+    }).filter(x=>x.d>=1.0).sort((a,b)=>b.d-a.d).slice(0,3).map(x=>x.id)
+  );
+
+  const hiddenCount=games.length-filtered.length;
   let html='';
   if(hiddenCount>0&&currentFilter!=='all'){
-    html+=`<div style="padding:5px 14px;font-size:10px;color:var(--dim);text-align:center;border-bottom:1px solid var(--border2);">
-      已隱藏 ${hiddenCount} 場無信號 · <span style="color:var(--blue);cursor:pointer;" onclick="setFilter('all')">顯示全部</span>
+    html+=`<div style="padding:5px 14px;font-size:10px;color:var(--dim);text-align:center;border-bottom:1px solid #21262d;">
+      已隱藏 ${hiddenCount} 場無信號 · <span style="color:#58a6ff;cursor:pointer;" onclick="setFilter('all')">顯示全部</span>
     </div>`;
   }
-  if(!filtered.length){
-    html+='<div style="padding:40px 14px;text-align:center;color:var(--dim);font-size:12px;">目前無符合條件的場次<br><span style="font-size:10px;color:#1b2a41;">快照累積中，稍後再試</span></div>';
+  if(!displayGames.length){
+    html+='<div style="padding:40px 14px;text-align:center;color:var(--dim);font-size:12px;">目前無符合條件的場次</div>';
     el.innerHTML=html; return;
   }
 
-  html+=filtered.map(g=>{
+  html+=displayGames.map(g=>{
     const snaps=(g.history||[]).filter(s=>s.total!=null);
     const mins=mu(g.commence_time);
     const s=calcSig(snaps,g.ml_hint,g.signal);
     const e=calcEnt(snaps,mins,s,g);
+    const isHot=hotIds.has(g.game_id);
     const cur=snaps.length?snaps[snaps.length-1].total:g.latest?.total;
     const mlD=g.delta?.ml||0;
     const dd=s.d, dc=dd>0?'up':dd<0?'dn':'fl';
@@ -813,10 +942,15 @@ function renderList(){
     }
 
     const btnCls=e.rdy?'gc-btn-enter':e.lbl==='等待停滯'?'gc-btn-wait':'gc-btn-watch';
+    const hotClass=isHot?'gc-hot':'';
+    const hotBadge=isHot?'<span class="gc-hot-badge">🔴HOT</span>':'';
+    const compactClass=compactMode?'compact':'';
 
-    return `<div onclick="selGame('${g.game_id}')" style="padding:10px 12px;border-bottom:1px solid #111c2d;cursor:pointer;border-left:3px solid ${borderCol};transition:background .1s;${isActive?'background:#161b22;':''}"
-      onmouseenter="if('${selId}'!=='${g.game_id}')this.style.background='rgba(255,255,255,.02)'"
+    return `<div onclick="selGame('${g.game_id}')" class="${hotClass} ${compactClass}"
+      style="padding:${compactMode?'6px':'10px'} 12px;border-bottom:1px solid #21262d;cursor:pointer;border-left:3px solid ${borderCol};transition:background .1s;${isActive?'background:#1c2333;':''}"
+      onmouseenter="if('${selId}'!=='${g.game_id}')this.style.background='rgba(255,255,255,.025)'"
       onmouseleave="if('${selId}'!=='${g.game_id}')this.style.background='transparent'">
+      ${compactMode?'':`
       <!-- Row 1: date + momentum + stars -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
         <span style="font-size:9px;color:#374151;font-family:monospace;">${dstr} ${fet(g.commence_time)}</span>
@@ -827,29 +961,32 @@ function renderList(){
         <div style="height:100%;width:${snapPct}%;background:${snapCol};border-radius:1px;transition:width .4s;"></div>
       </div>
       <!-- Time to game -->
-      <div style="font-size:9px;font-weight:700;color:${ttg.col};margin-bottom:4px;">${ttg.txt}</div>
+      <div style="font-size:9px;font-weight:700;color:${ttg.col};margin-bottom:4px;">${ttg.txt}</div>`}
       <!-- Team names + badges -->
-      <div style="font-size:12px;font-weight:800;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:4px;">
+      <div style="font-size:${compactMode?'11':'12'}px;font-weight:800;display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:${compactMode?'2':'4'}px;">
         <span style="color:#6e7d94;">${away.split(' ').pop()}</span>
-        <span style="color:#1b2a41;">VS</span>
+        <span style="color:#21262d;">VS</span>
         ${home.split(' ').pop()}
+        ${hotBadge}
         ${s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(57,255,20,.12);color:#39ff14;border:1px solid rgba(57,255,20,.25);">⚡推薦</span>':''}
         ${s.st&&!s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(255,183,77,.1);color:#ffb74d;border:1px solid rgba(255,183,77,.25);">🔥蒸汽</span>':''}
-        ${s.mlSig!=='FLAT'?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(192,132,252,.1);color:#c084fc;border:1px solid rgba(192,132,252,.25);">🦈獨贏</span>':''}
-        ${s.grade==='WATCH'?'<span style="font-size:9px;color:#374151;border:1px solid #1b2a41;padding:1px 5px;border-radius:3px;">👁觀察</span>':''}
+        ${s.mlSig!=='FLAT'?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(210,168,255,.1);color:#d2a8ff;border:1px solid rgba(210,168,255,.25);">🦈獨贏</span>':''}
       </div>
       <!-- Numbers + state label -->
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="display:flex;gap:6px;align-items:baseline;font-family:monospace;">
-            <span style="font-size:14px;font-weight:900;color:var(--text);">${cur??'—'}</span>
+            <span style="font-size:14px;font-weight:900;color:#cdd9e5;">${cur??'—'}</span>
             <span style="font-size:10px;color:#374151;">ML:<span class="${mdc}" style="font-weight:700;">${mds}</span></span>
           </div>
-          ${eBar}
+          ${compactMode?'':eBar}
         </div>
-        <div style="font-size:11px;font-weight:700;color:${stateLabel.col};text-align:right;white-space:nowrap;">${stateLabel.txt}</div>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <button class="copy-btn" onclick="event.stopPropagation();copyGameData(games.find(g=>g.game_id==='${g.game_id}'),this)">複製</button>
+          <div style="font-size:11px;font-weight:700;color:${stateLabel.col};text-align:right;white-space:nowrap;">${stateLabel.txt}</div>
+        </div>
       </div>
-      ${betHtml?`<div style="margin-top:4px;">${betHtml}</div>`:''}
+      ${!compactMode&&betHtml?`<div style="margin-top:4px;">${betHtml}</div>`:''}
     </div>`;
   }).join('');
   el.innerHTML=html;
@@ -1178,11 +1315,16 @@ function renderHist(data){
   const wr=tot>0?Math.round(w/tot*100):0;
   const rtot=rw+rl;
   const rwr=rtot>0?Math.round(rw/rtot*100):0;
+  // ROI 計算（假設每注固定 100 美元，賠率 -110 標準美式）
+  const roi100=tot>0?Math.round((w*90.9-l*100)/tot):0;
   document.getElementById('hst').innerHTML=
-    `<div style="font-size:12px;">
-      <div style="font-weight:800;">${w}勝 ${l}敗 ${p}平</div>
-      <div style="color:${wr>=55?'#4ade80':wr>=45?'#fbbf24':'#f87171'};font-weight:800;font-size:13px;">全部 ${wr}%</div>
-      ${rtot>0?`<div style="color:var(--accent);font-size:10px;margin-top:2px;">⚡ 推薦 ${rw}勝${rl}敗 (${rwr}%)</div>`:''}
+    `<div style="font-size:12px;text-align:right;">
+      <div style="font-weight:800;color:#cdd9e5;">${w}勝 ${l}敗 ${p}平</div>
+      <div style="color:${wr>=55?'#56d364':wr>=45?'#f0b429':'#ff7b72'};font-weight:800;font-size:13px;">勝率 ${wr}%</div>
+      ${rtot>0?`<div style="color:#39ff14;font-size:10px;">⚡ 推薦 ${rw}勝${rl}敗 (${rwr}%)</div>`:''}
+      <div style="color:${roi100>=0?'#56d364':'#ff7b72'};font-size:10px;margin-top:2px;">
+        每注$100 理論績效: ${roi100>=0?'+':''}$${roi100}
+      </div>
     </div>`;
 }
 
