@@ -443,27 +443,34 @@ function passFilter(s, e){
 
 // ── TIME TO GAME ─────────────────────────────────────────────────────────────
 function timeToGame(mins){
-  if(mins<=0)    return {txt:'🔴 進行中', col:'#f87171'};
-  if(mins<60)    return {txt:`${mins}分鐘後開賽`, col:'#fbbf24'};
-  if(mins<120)   return {txt:`${Math.floor(mins/60)}小時${mins%60?mins%60+'分':''} 後開賽`, col:'#fbbf24'};
-  if(mins<=480)  return {txt:`${Math.floor(mins/60)}小時後開賽 ⭐`, col:'#4ade80'};
-  if(mins<=720)  return {txt:`${Math.floor(mins/60)}小時後開賽`, col:'#6e7d94'};
-  return {txt:`${Math.floor(mins/60)}小時後開賽（尚早）`, col:'#374151'};
+  if(mins<=0)   return {txt:'🔴 進行中',   col:'#f87171'};
+  if(mins<60)   return {txt:`${mins}分後開賽`, col:'#f87171'};
+  if(mins<120)  return {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽`, col:'#fbbf24'};
+  if(mins<=480) return {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽 ⭐`, col:'#4ade80'};
+  return        {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽`, col:'#374151'};
 }
 
 // ── ENERGY BAR ───────────────────────────────────────────────────────────────
-function energyBar(d){
+function energyBar(d, juiceDelta){
   const a=Math.abs(d);
-  if(a===0) return '';
-  const pct=Math.min(a/3*100,100); // 3.0 = 滿格
-  const col=a>=1.5?'#39ff14':a>=1.0?'#ffb74d':a>=0.5?'#64748b':'#374151';
+  const jd=Math.abs(juiceDelta||0);
+  if(a===0&&jd<5) return ''; // 完全無動靜不顯示
+  const pct=Math.min(a/3*100,100);
+  const jpct=Math.min(jd/20*100,100);
+  const col=a>=1.5?'#39ff14':a>=1.0?'#ffb74d':a>=0.5?'#4b5563':'#1b2a41';
+  const jcol='#3b82f6';
   const pulseClass=a>=1.5?'pulse-fast':a>=1.0?'pulse-slow':'';
-  const label=d>0?`+${d}`:`${d}`;
-  return `<div class="energy-wrap" style="margin-top:3px;">
-    <div style="width:60px;height:4px;background:#1b2a41;border-radius:2px;overflow:hidden;flex-shrink:0;">
+  const label=d>0?`+${d}`:d<0?`${d}`:`±0`;
+  const juiceLabel=jd>=5?`<span style="font-size:9px;color:${jcol};margin-left:4px;">賠率${juiceDelta>0?'+':''}${juiceDelta}</span>`:'';
+  return `<div style="display:flex;align-items:center;gap:5px;margin-top:3px;">
+    <div style="width:50px;height:3px;background:#1b2a41;border-radius:2px;overflow:hidden;flex-shrink:0;">
       <div style="width:${pct}%;height:100%;background:${col};border-radius:2px;transition:width .5s;"></div>
     </div>
-    <span class="energy-label ${pulseClass}" style="color:${col};font-size:11px;">${label}</span>
+    ${jd>=5?`<div style="width:20px;height:3px;background:#111c2d;border-radius:2px;overflow:hidden;flex-shrink:0;">
+      <div style="width:${jpct}%;height:100%;background:${jcol};border-radius:2px;"></div>
+    </div>`:''}
+    <span class="${pulseClass}" style="font-size:10px;font-weight:700;color:${col};font-family:monospace;">${label}</span>
+    ${juiceLabel}
   </div>`;
 }
 
@@ -472,20 +479,22 @@ function momentumDot(s){
   if(s.rec)                       return '<span class="mdot mdot-steam" title="強力信號"></span>';
   if(s.st)                        return '<span class="mdot mdot-move" title="蒸汽移動"></span>';
   if(s.mlSig&&s.mlSig!=='FLAT')  return '<span class="mdot mdot-ml" title="獨贏信號"></span>';
+  if(s.grade==='JUICE')           return '<span class="mdot" style="background:#3b82f6;opacity:.6;" title="賠率微調"></span>';
   if(Math.abs(s.d)>0)             return '<span class="mdot" style="background:#2d3748;" title="微幅移動"></span>';
   return '<span class="mdot mdot-flat" title="盤口穩定"></span>';
 }
 
 // ── ENTRY STATE LABEL ─────────────────────────────────────────────────────────
 function entryStateLabel(e, s, snaps){
-  if(e.lbl==='進行中')   return {txt:'🔴 進行中',    col:'#f87171'};
-  if(e.lbl==='已過期')   return {txt:'⏸ 已結束',    col:'#374151'};
-  if(e.lbl==='進場')     return {txt:'✅ 可進場',     col:'#4ade80'};
+  if(e.lbl==='進行中')   return {txt:'🔴 進行中',     col:'#f87171'};
+  if(e.lbl==='已過期')   return {txt:'⏸ 已結束',     col:'#374151'};
+  if(e.lbl==='進場')     return {txt:'✅ 可進場',      col:'#4ade80'};
   if(e.lbl==='等待停滯') return {txt:'⏳ 資金湧入中', col:'#fbbf24'};
-  // 觀察中：細分原因
-  if(!s.snapOk)          return {txt:`📸 累積快照中 (${snaps.length}/3)`, col:'#374151'};
-  if(s.grade==='WATCH')  return {txt:'👁 盤口微動，觀察中',               col:'#4b5563'};
-  return                        {txt:'⏸ 盤口穩定',                        col:'#374151'};
+  // 觀察中細分
+  if(!s.snapOk)          return {txt:'📡 監控中',      col:'#374151'};
+  if(s.grade==='JUICE')  return {txt:'💧 賠率微調',    col:'#3b82f6'};
+  if(s.grade==='WATCH')  return {txt:'👁 微動觀察',    col:'#4b5563'};
+  return                        {txt:'⏸ 盤口冷卻中',  col:'#1e293b'};
 }
 
 // clock
@@ -545,17 +554,19 @@ function starRating(n){
 // ── SIGNAL（新門檻：≥1.5推薦 · 1.0–1.4蒸汽 · 0.5–0.9觀察）────────────────
 function calcSig(snaps, mlHint, signalData){
   const mlSig=signalData?.ml||'FLAT';
-  if(!snaps||snaps.length<2) return{lbl:'觀望',d:0,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk:false};
+  const juiceDelta=signalData?.juice_delta||signalData?.juice||0;
+  const momentum=signalData?.momentum||0;
+  if(!snaps||snaps.length<2) return{lbl:'盤口穩定',d:0,st:false,col:'#374151',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk:false,juiceDelta,momentum};
 
   const d=+(snaps[snaps.length-1].total-snaps[0].total).toFixed(1);
   const a=Math.abs(d);
   const snapOk=snaps.length>=3;
 
-  // 新門檻
-  if(a>=1.5) return{lbl:d>0?'⚡ 大分推薦':'⚡ 小分推薦',d,st:true,col:d>0?'#39ff14':'#22d3ee',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:true,grade:'RECOMMEND',mlSig,mlHint,snapOk};
-  if(a>=1.0) return{lbl:d>0?'🔥 大分蒸汽':'🔥 小分蒸汽',d,st:true,col:d>0?'#f97316':'#38bdf8',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:false,grade:'STEAM',mlSig,mlHint,snapOk};
-  if(a>=0.5) return{lbl:d>0?'👁 大分觀察':'👁 小分觀察',d,st:false,col:'#64748b',pick:null,cls:'',rec:false,grade:'WATCH',mlSig,mlHint,snapOk};
-  return{lbl:'觀望',d,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk};
+  if(a>=1.5) return{lbl:d>0?'⚡ 大分推薦':'⚡ 小分推薦',d,st:true,col:d>0?'#39ff14':'#22d3ee',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:true,grade:'RECOMMEND',mlSig,mlHint,snapOk,juiceDelta,momentum};
+  if(a>=1.0) return{lbl:d>0?'🔥 大分蒸汽':'🔥 小分蒸汽',d,st:true,col:d>0?'#ffb74d':'#38bdf8',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:false,grade:'STEAM',mlSig,mlHint,snapOk,juiceDelta,momentum};
+  if(a>=0.5) return{lbl:d>0?'↑ 大分觀察':'↓ 小分觀察',d,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'WATCH',mlSig,mlHint,snapOk,juiceDelta,momentum};
+  if(Math.abs(juiceDelta)>=5) return{lbl:'💧 賠率微調',d,st:false,col:'#3b82f6',pick:null,cls:'',rec:false,grade:'JUICE',mlSig,mlHint,snapOk,juiceDelta,momentum};
+  return{lbl:'盤口穩定',d,st:false,col:'#374151',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk,juiceDelta,momentum};
 }
 
 // ── ENTRY & BET SUGGESTION ────────────────────────────────────────────────────
@@ -761,7 +772,7 @@ function renderList(){
     const snapCol=sn>=5?'#39ff14':sn>=3?'#fbbf24':'#334155';
     const isActive=selId===g.game_id;
     const stateLabel=entryStateLabel(e,s,snaps);
-    const eBar=energyBar(s.d);
+    const eBar=energyBar(s.d, s.juiceDelta);
 
     // 左邊框顏色
     let borderCol='#1a2535';
@@ -954,7 +965,7 @@ function renderDetail(g){
           style="color:${s.d>0?'#ffb74d':s.d<0?'#38bdf8':'#374151'};font-size:${Math.abs(s.d)>=1.5?18:14}px">
           ${s.d>0?'+':''}${s.d}${Math.abs(s.d)>=1.5?' ⚡':Math.abs(s.d)>=1.0?' 🔥':''}
         </div>
-        ${energyBar(s.d)}
+        ${energyBar(s.d, s.juiceDelta)}
       </div>
       <div class="ocell"><div class="ol">讓分</div><div class="ov" style="color:#8b949e">${fo(lat.spread_home)}</div></div>
     </div>
