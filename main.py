@@ -72,14 +72,24 @@ def signal_from_snaps(snaps: list) -> dict:
     valid = [s for s in snaps if s.get("total") is not None]
     if len(valid) < 2:
         return {"total": "FLAT", "ml": "FLAT", "delta": 0, "ml_delta": 0,
+                "juice_delta": 0, "momentum": 0,
                 "grade": "NONE", "sharp": False, "snap_count": len(valid)}
 
     td  = round(valid[-1]["total"] - valid[0]["total"], 1)
     mld = round((valid[-1].get("ml_home") or 0) - (valid[0].get("ml_home") or 0))
-    a   = abs(td)
+
+    # 賠率變動（over juice delta）
+    oj_first = valid[0].get("over_juice") or 0
+    oj_last  = valid[-1].get("over_juice") or 0
+    juice_d  = round(oj_last - oj_first)
+
+    # 綜合動能分數：total 移動為主，賠率移動為輔
+    momentum = round(abs(td) + abs(juice_d) * 0.05, 2)
+
+    a     = abs(td)
     sharp = is_sharp_money(td, mld)
 
-    # 新門檻
+    # 新門檻（優先看 total 移動）
     if a >= THRESHOLD_RECOMMEND:
         ts    = "RECOMMEND_OVER"  if td > 0 else "RECOMMEND_UNDER"
         grade = "RECOMMEND"
@@ -89,6 +99,10 @@ def signal_from_snaps(snaps: list) -> dict:
     elif a >= THRESHOLD_WATCH:
         ts    = "WATCH_OVER"  if td > 0 else "WATCH_UNDER"
         grade = "WATCH"
+    elif abs(juice_d) >= 5:
+        # 總分沒動但賠率有明顯變動 = 莊家微調賠率
+        ts    = "JUICE_SHIFT"
+        grade = "JUICE"
     else:
         ts    = "FLAT"
         grade = "FLAT"
@@ -102,13 +116,15 @@ def signal_from_snaps(snaps: list) -> dict:
         ms = "FLAT"
 
     return {
-        "total":      ts,
-        "ml":         ms,
-        "delta":      td,
-        "ml_delta":   mld,
-        "grade":      grade,
-        "sharp":      sharp,       # True = 銳錢，False = 公眾錢
-        "snap_count": len(valid),
+        "total":       ts,
+        "ml":          ms,
+        "delta":       td,
+        "ml_delta":    mld,
+        "juice_delta": juice_d,
+        "momentum":    momentum,
+        "grade":       grade,
+        "sharp":       sharp,
+        "snap_count":  len(valid),
     }
 
 def pick_from_signal(sig, game):
@@ -456,7 +472,9 @@ async def get_games():
             "latest":  {"total": last.get("total"),  "over_juice": last.get("over_juice"),
                         "under_juice": last.get("under_juice"), "ml_home": last.get("ml_home"),
                         "ml_away": last.get("ml_away"), "spread_home": last.get("spread_home")},
-            "delta":   {"total": sig["delta"], "ml": ml_delta},
+            "delta":   {"total": sig["delta"], "ml": ml_delta,
+                        "juice": sig.get("juice_delta", 0),
+                        "momentum": sig.get("momentum", 0)},
             "signal":  {"total": sig["total"], "ml": ml_signal, "grade": sig.get("grade","FLAT"),
                         "sharp": sig.get("sharp", False)},
             "ml_hint": ml_hint,
