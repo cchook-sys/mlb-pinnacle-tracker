@@ -458,22 +458,6 @@ const mu=iso=>Math.round((new Date(iso)-Date.now())/60000);
 const fet=iso=>new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
 const fdm=m=>m<=0?'🔴 LIVE':m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+'m':m+'m';
 
-// ── 最後更新計時器 ────────────────────────────────────────────────────────────
-let lastUpdateTime=null;
-function startUpdateTimer(){
-  setInterval(()=>{
-    if(!lastUpdateTime) return;
-    const sec=Math.round((Date.now()-lastUpdateTime)/1000);
-    const el=document.getElementById('last-update-ago');
-    if(!el) return;
-    if(sec<60) el.textContent=`${sec} 秒前更新`;
-    else if(sec<3600) el.textContent=`${Math.floor(sec/60)} 分鐘前更新`;
-    else el.textContent=`${Math.floor(sec/3600)} 小時前更新`;
-    // 超過 10 分鐘變紅色警示
-    el.style.color=sec>600?'#f87171':sec>300?'#fbbf24':'#4ade80';
-  },1000);
-}
-
 // ── 術語 Tooltip ──────────────────────────────────────────────────────────────
 const TERMS={
   'OVER':    '大分：比賽總得分超過盤口線',
