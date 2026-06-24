@@ -7,9 +7,9 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+html,body{height:100%;background:#0b0e14;color:#d1d9e6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
 :root{
-  --bg:#07090f;--surface:#0d1117;--card:#0d1b2e;--border:#1b2a41;--border2:#111c2d;
+  --bg:#0b0e14;--surface:#0d1117;--card:#161b22;--border:#1b2a41;--border2:#111c2d;
   --text:#d1d9e6;--muted:#6e7d94;--dim:#374151;
   --accent:#39ff14;--blue:#3b82f6;--orange:#ffb74d;
   --cyan:#38bdf8;--red:#f87171;--yellow:#fbbf24;--green:#4ade80;--purple:#c084fc;
@@ -18,7 +18,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 
 /* ── LAYOUT ── */
 .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 16px;flex-shrink:0;}
+.topbar{background:#0d1117;border-bottom:1px solid var(--border);padding:10px 16px;flex-shrink:0;}
 .tabbar{background:var(--bg);border-bottom:1px solid var(--border2);padding:7px 16px;display:flex;gap:6px;flex-shrink:0;}
 
 /* Desktop: side by side / Mobile: stack */
@@ -26,12 +26,12 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 .main-history{display:none;flex:1;overflow:hidden;flex-direction:column;}
 
 /* SIDEBAR */
-.sidebar{width:360px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border2);display:flex;flex-direction:column;}
-.detail-panel{flex:1;overflow-y:auto;padding:18px 20px;}
+.sidebar{background:#0b0e14;width:360px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border2);display:flex;flex-direction:column;}
+.detail-panel{flex:1;overflow-y:auto;padding:18px 20px;background:#0b0e14;}
 
 /* MOBILE: full width panels */
 @media(max-width:768px){
-  .sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border2);}
+  .sidebar{background:#0b0e14;width:100%;border-right:none;border-bottom:1px solid var(--border2);}
   .main-today{flex-direction:column;}
   .detail-panel{padding:14px;}
   .topbar-meta{display:none;}
@@ -44,7 +44,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
   .main-today.detail-open .detail-panel{display:flex;flex-direction:column;}
   .mobile-back{display:flex!important;}
 }
-.mobile-back{display:none;align-items:center;gap:6px;padding:8px 14px;background:var(--surface);border-bottom:1px solid var(--border2);font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;flex-shrink:0;}
+.mobile-back{display:none;align-items:center;gap:6px;padding:8px 14px;background:#0d1117;border-bottom:1px solid var(--border2);font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;flex-shrink:0;}
 
 /* ── TOP BAR ── */
 .topbar-inner{display:flex;justify-content:space-between;align-items:center;}
@@ -53,7 +53,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 .topbar-meta{font-size:10px;color:var(--dim);margin-top:3px;display:flex;gap:10px;}
 .topbar-meta span{color:var(--muted);}
 .topbar-right{display:flex;gap:6px;align-items:center;}
-.stat-box{display:flex;gap:0;background:#09101a;border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.stat-box{display:flex;gap:0;background:#0b0e14;border:1px solid var(--border);border-radius:6px;overflow:hidden;}
 .stat{text-align:center;padding:5px 11px;border-right:1px solid var(--border2);}
 .stat:last-child{border-right:none;}
 .stl{font-size:8px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;}
@@ -81,7 +81,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 
 /* ── CORRECTION BANNER ── */
 .corr-wrap{flex-shrink:0;border-bottom:1px solid var(--border2);}
-.corr-hdr{padding:7px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:#0a1628;}
+.corr-hdr{padding:7px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:#0b1220;}
 .corr-title{font-size:10px;font-weight:700;color:var(--yellow);letter-spacing:.5px;}
 .corr-body{padding:0 14px 8px;}
 .corr-item{font-size:10px;padding:6px 9px;border-radius:5px;margin-top:5px;line-height:1.5;}
@@ -92,7 +92,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 /* ── GAME CARD ── */
 .gc{padding:10px 13px;border-bottom:1px solid var(--border2);cursor:pointer;transition:background .1s;border-left:3px solid transparent;}
 .gc:hover{background:rgba(255,255,255,.025);}
-.gc.sel{background:var(--card);border-left-color:var(--blue);}
+.gc.sel{background:#161b22;border-left-color:var(--blue);}
 .gc.s-over{border-left-color:var(--orange);}
 .gc.s-under{border-left-color:var(--cyan);}
 .gc.s-rec{border-left-color:var(--accent);}
@@ -124,7 +124,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 /* ENTRY BUTTON */
 .gc-btn{font-size:10px;font-weight:800;padding:4px 11px;border-radius:4px;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;}
 .gc-btn-enter{background:#dc2626;color:#fff;animation:pr 1.4s ease-in-out infinite;}
-.gc-btn-watch{background:#1a2535;color:var(--dim);cursor:default;}
+.gc-btn-watch{background:#111c2d;color:var(--dim);cursor:default;}
 .gc-btn-wait{background:#1c1a08;color:var(--yellow);cursor:default;}
 
 /* PULSE DOT */
@@ -151,29 +151,29 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 .cb-status{font-size:10px;margin-top:6px;font-weight:700;}
 
 /* CHART */
-.chart-box{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px;}
+.chart-box{background:#161b22;border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px;}
 .chart-lbl{font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:8px;}
 .chart-canvas{width:100%!important;height:200px!important;}
 
 /* ODDS GRID */
 .ogrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;}
-.ocell{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:8px;text-align:center;}
+.ocell{background:#161b22;border:1px solid var(--border);border-radius:6px;padding:8px;text-align:center;}
 .ol{font-size:8px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px;}
 .ov{font-size:14px;font-weight:900;font-family:monospace;}
 .ov-arrow{font-size:9px;font-weight:700;margin-left:2px;}
 
 /* SNAP TABLE */
-.snap-box{background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
-.snap-hdr{padding:6px 10px;font-size:9px;color:var(--dim);letter-spacing:2px;border-bottom:1px solid var(--border);background:var(--surface);}
+.snap-box{background:#161b22;border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.snap-hdr{padding:6px 10px;font-size:9px;color:var(--dim);letter-spacing:2px;border-bottom:1px solid var(--border);background:#0d1117;}
 .snap-tbl{width:100%;border-collapse:collapse;font-size:10px;}
 .snap-tbl th{padding:4px 8px;text-align:left;color:var(--dim);font-size:9px;border-bottom:1px solid var(--border);font-weight:600;}
 .snap-tbl td{padding:4px 8px;border-bottom:1px solid rgba(30,58,95,.2);font-family:monospace;}
 .snap-tbl tr.nw td{background:rgba(59,130,246,.06);}
 
 /* ── HISTORY ── */
-.hist-head{padding:12px 16px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;background:var(--surface);flex-shrink:0;}
+.hist-head{padding:12px 16px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;background:#0d1117;flex-shrink:0;}
 .htbl{width:100%;border-collapse:collapse;font-size:11px;}
-.htbl th{padding:8px 12px;font-size:9px;color:var(--dim);letter-spacing:1px;border-bottom:2px solid var(--border);background:var(--surface);font-weight:700;text-transform:uppercase;}
+.htbl th{padding:8px 12px;font-size:9px;color:var(--dim);letter-spacing:1px;border-bottom:2px solid var(--border);background:#0d1117;font-weight:700;text-transform:uppercase;}
 .htbl td{padding:9px 12px;border-bottom:1px solid rgba(30,58,95,.2);vertical-align:middle;}
 .htbl tr:hover td{background:rgba(255,255,255,.02);}
 .htbl tr.rec-row td:first-child{border-left:3px solid var(--accent);}
@@ -190,11 +190,11 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 /* ── PARLAY MODAL ── */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:center;padding:14px;backdrop-filter:blur(4px);}
 .modal-bg.open{display:flex;}
-.modal{background:var(--surface);border:1px solid rgba(57,255,20,.2);border-radius:10px;width:100%;max-width:860px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;}
+.modal{background:#0d1117;border:1px solid rgba(57,255,20,.2);border-radius:10px;width:100%;max-width:860px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;}
 .modal-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
 .modal-head h2{font-size:15px;font-weight:900;letter-spacing:2px;color:var(--accent);}
 .modal-body{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;overflow-y:auto;}
-.pc{background:var(--card);border:1px solid var(--border2);border-radius:7px;overflow:hidden;position:relative;}
+.pc{background:#161b22;border:1px solid var(--border2);border-radius:7px;overflow:hidden;position:relative;}
 .pc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--blue));}
 .pcb{padding:11px 13px;}
 .pt{font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:7px;text-transform:uppercase;}
@@ -241,7 +241,7 @@ html,body{height:100%;background:#07090f;color:#d1d9e6;font-family:-apple-system
 .energy-label{font-size:11px;font-weight:700;font-family:monospace;}
 
 /* FILTER BAR */
-.filter-bar{padding:6px 12px;border-bottom:1px solid var(--border2);display:flex;gap:5px;flex-wrap:wrap;flex-shrink:0;background:#09101a;}
+.filter-bar{padding:6px 12px;border-bottom:1px solid var(--border2);display:flex;gap:5px;flex-wrap:wrap;flex-shrink:0;background:#0b0e14;}
 .fchip{font-size:10px;font-weight:700;padding:3px 10px;border-radius:12px;border:1px solid var(--border);color:var(--muted);cursor:pointer;transition:all .15s;background:transparent;}
 .fchip:hover{border-color:var(--muted);color:var(--text);}
 .fchip.active{border-color:var(--blue);color:#fff;background:rgba(59,130,246,.2);}
@@ -466,7 +466,7 @@ function energyBar(d, juiceDelta){
     <div style="width:50px;height:3px;background:#1b2a41;border-radius:2px;overflow:hidden;flex-shrink:0;">
       <div style="width:${pct}%;height:100%;background:${col};border-radius:2px;transition:width .5s;"></div>
     </div>
-    ${jd>=5?`<div style="width:20px;height:3px;background:#111c2d;border-radius:2px;overflow:hidden;flex-shrink:0;">
+    ${jd>=5?`<div style="width:20px;height:3px;background:#0d1117;border-radius:2px;overflow:hidden;flex-shrink:0;">
       <div style="width:${jpct}%;height:100%;background:${jcol};border-radius:2px;"></div>
     </div>`:''}
     <span class="${pulseClass}" style="font-size:10px;font-weight:700;color:${col};font-family:monospace;">${label}</span>
@@ -525,7 +525,7 @@ function addTooltips(){
     if(el._tipBound) return;
     el._tipBound=true;
     const tip=document.createElement('div');
-    tip.style.cssText='position:fixed;background:#0d1b2e;border:1px solid #1e3a5f;color:#e6edf3;font-size:11px;padding:6px 10px;border-radius:5px;max-width:200px;line-height:1.5;z-index:999;pointer-events:none;display:none;';
+    tip.style.cssText='position:fixed;background:#161b22;border:1px solid #1b2a41;color:#d1d9e6;font-size:11px;padding:6px 10px;border-radius:5px;max-width:200px;line-height:1.5;z-index:999;pointer-events:none;display:none;';
     document.body.appendChild(tip);
     el.addEventListener('mouseenter',ev=>{
       const key=el.getAttribute('data-tip');
@@ -747,7 +747,7 @@ function renderList(){
     </div>`;
   }
   if(!filtered.length){
-    html+='<div style="padding:40px 14px;text-align:center;color:var(--dim);font-size:12px;">目前無符合條件的場次<br><span style="font-size:10px;color:#1e3a5f;">快照累積中，稍後再試</span></div>';
+    html+='<div style="padding:40px 14px;text-align:center;color:var(--dim);font-size:12px;">目前無符合條件的場次<br><span style="font-size:10px;color:#1b2a41;">快照累積中，稍後再試</span></div>';
     el.innerHTML=html; return;
   }
 
@@ -797,7 +797,7 @@ function renderList(){
 
     const btnCls=e.rdy?'gc-btn-enter':e.lbl==='等待停滯'?'gc-btn-wait':'gc-btn-watch';
 
-    return `<div onclick="selGame('${g.game_id}')" style="padding:10px 12px;border-bottom:1px solid #111c2d;cursor:pointer;border-left:3px solid ${borderCol};transition:background .1s;${isActive?'background:#0d1b2e;':''}"
+    return `<div onclick="selGame('${g.game_id}')" style="padding:10px 12px;border-bottom:1px solid #111c2d;cursor:pointer;border-left:3px solid ${borderCol};transition:background .1s;${isActive?'background:#161b22;':''}"
       onmouseenter="if('${selId}'!=='${g.game_id}')this.style.background='rgba(255,255,255,.02)'"
       onmouseleave="if('${selId}'!=='${g.game_id}')this.style.background='transparent'">
       <!-- Row 1: date + momentum + stars -->
@@ -806,7 +806,7 @@ function renderList(){
         <div style="display:flex;align-items:center;gap:5px;">${mdot} ${starRating(sn)}</div>
       </div>
       <!-- Snap progress bar -->
-      <div style="height:2px;background:#111c2d;border-radius:1px;margin-bottom:3px;overflow:hidden;">
+      <div style="height:2px;background:#0d1117;border-radius:1px;margin-bottom:3px;overflow:hidden;">
         <div style="height:100%;width:${snapPct}%;background:${snapCol};border-radius:1px;transition:width .4s;"></div>
       </div>
       <!-- Time to game -->
@@ -819,7 +819,7 @@ function renderList(){
         ${s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(57,255,20,.12);color:#39ff14;border:1px solid rgba(57,255,20,.25);">⚡推薦</span>':''}
         ${s.st&&!s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(255,183,77,.1);color:#ffb74d;border:1px solid rgba(255,183,77,.25);">🔥蒸汽</span>':''}
         ${s.mlSig!=='FLAT'?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(192,132,252,.1);color:#c084fc;border:1px solid rgba(192,132,252,.25);">🦈獨贏</span>':''}
-        ${s.grade==='WATCH'?'<span style="font-size:9px;color:#4b5563;border:1px solid #1b2a41;padding:1px 5px;border-radius:3px;">👁觀察</span>':''}
+        ${s.grade==='WATCH'?'<span style="font-size:9px;color:#374151;border:1px solid #1b2a41;padding:1px 5px;border-radius:3px;">👁觀察</span>':''}
       </div>
       <!-- Numbers + state label -->
       <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -877,9 +877,9 @@ function renderDetail(g){
   // ── Decision Box（最醒目的決策區，置頂）─────────────────────────────────
   let conclusionHtml='';
   const noSigHtml=`
-    <div style="background:#0a1628;border:1px solid #1e3a5f;border-radius:8px;padding:14px 16px;margin-bottom:14px;text-align:center;">
+    <div style="background:#0b1220;border:1px solid #1b2a41;border-radius:8px;padding:14px 16px;margin-bottom:14px;text-align:center;">
       <div style="font-size:24px;margin-bottom:6px;">─</div>
-      <div style="font-size:16px;font-weight:900;color:#4b5563;">盤口穩定，不建議進場</div>
+      <div style="font-size:16px;font-weight:900;color:#374151;">盤口穩定，不建議進場</div>
       <div style="font-size:11px;color:#374151;margin-top:4px;">
         ${!s.snapOk?`快照僅 ${snaps.length} 筆，需累積 ≥3 筆`:
           s.grade==='WATCH'?'移動幅度 0.5–1.0，屬觀察範圍，非蒸汽信號':
@@ -942,11 +942,11 @@ function renderDetail(g){
     <div class="ogrid">
       <div class="ocell">
         <div class="ol">開盤</div>
-        <div class="ov" style="color:#8b949e">${open??'—'}</div>
+        <div class="ov" style="color:#6e7d94">${open??'—'}</div>
       </div>
       <div class="ocell">
         <div class="ol">現盤</div>
-        <div class="ov" style="color:${s.d>0?'#f97316':s.d<0?'#38bdf8':'#e6edf3'}">
+        <div class="ov" style="color:${s.d>0?'#f97316':s.d<0?'#38bdf8':'#d1d9e6'}">
           ${cur??'—'}<span class="ov-arrow">${s.d>0?'▲':s.d<0?'▼':''}</span>
         </div>
       </div>
@@ -967,7 +967,7 @@ function renderDetail(g){
         </div>
         ${energyBar(s.d, s.juiceDelta)}
       </div>
-      <div class="ocell"><div class="ol">讓分</div><div class="ov" style="color:#8b949e">${fo(lat.spread_home)}</div></div>
+      <div class="ocell"><div class="ol">讓分</div><div class="ov" style="color:#6e7d94">${fo(lat.spread_home)}</div></div>
     </div>
 
     ${snaps.length>0?`
@@ -980,13 +980,13 @@ function renderDetail(g){
           const d2=s2.total!=null&&prev?.total!=null?+(s2.total-prev.total).toFixed(1):null;
           const dc=d2==null?'#4b5563':d2>0?'#f97316':d2<0?'#38bdf8':'#4b5563';
           return `<tr class="${i===0?'nw':''}">
-            <td style="color:#4b5563">${snaps.length-i}</td>
-            <td style="font-weight:${i===0?800:400};color:${i===0?'#e6edf3':'#8b949e'}">${s2.total??'—'}</td>
+            <td style="color:#374151">${snaps.length-i}</td>
+            <td style="font-weight:${i===0?800:400};color:${i===0?'#d1d9e6':'#6e7d94'}">${s2.total??'—'}</td>
             <td style="color:${dc};font-weight:700">${d2==null?'—':d2===0?'─':d2>0?`▲+${d2}`:`▼${d2}`}</td>
             <td style="color:#f97316">${fo(s2.over_juice)}</td>
             <td style="color:#38bdf8">${fo(s2.under_juice)}</td>
-            <td style="color:#8b949e">${fo(s2.ml_home)}</td>
-            <td style="color:#8b949e">${fo(s2.ml_away)}</td>
+            <td style="color:#6e7d94">${fo(s2.ml_home)}</td>
+            <td style="color:#6e7d94">${fo(s2.ml_away)}</td>
           </tr>`;
         }).join('')}</tbody>
       </table>
@@ -1010,8 +1010,8 @@ function renderDetail(g){
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
       plugins:{
-        legend:{labels:{color:'#8b949e',font:{size:10},usePointStyle:true,pointStyleWidth:18}},
-        tooltip:{backgroundColor:'#0d1b2e',borderColor:'#1e3a5f',borderWidth:1,titleColor:'#8b949e',bodyColor:'#e6edf3',padding:10}
+        legend:{labels:{color:'#6e7d94',font:{size:10},usePointStyle:true,pointStyleWidth:18}},
+        tooltip:{backgroundColor:'#0d1117',borderColor:'#30363d',borderWidth:1,titleColor:'#6e7d94',bodyColor:'#d1d9e6',padding:10}
       },
       scales:{
         x:{ticks:{color:'#4b5563',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(30,58,95,.2)'}},
@@ -1095,7 +1095,7 @@ function renderHist(data){
         <div style="font-size:10px;color:var(--dim);margin-top:1px">${fet(g.commence_time)}</div>
         <span class="grade-badge ${isRec?'gb-rec':'gb-steam'}">${grade}</span>
       </td>
-      <td style="font-family:monospace;color:#8b949e">${g.open_total??'—'}</td>
+      <td style="font-family:monospace;color:#6e7d94">${g.open_total??'—'}</td>
       <td style="font-family:monospace;font-weight:800;font-size:13px">${g.close_total??'—'}</td>
       <td>${ds}</td>
       <td style="font-weight:800;color:${g.pick?.includes('OVER')?'#f97316':'#38bdf8'}">${g.pick||'<span style="color:var(--dim)">觀望</span>'}</td>
