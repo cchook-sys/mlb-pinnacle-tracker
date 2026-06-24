@@ -358,66 +358,131 @@ const mu=iso=>Math.round((new Date(iso)-Date.now())/60000);
 const fet=iso=>new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
 const fdm=m=>m<=0?'🔴 LIVE':m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+'m':m+'m';
 
-// ── STAR RATING (snapshot quality) ─────────────────────────────────────────
+// ── 最後更新計時器 ────────────────────────────────────────────────────────────
+let lastUpdateTime=null;
+function startUpdateTimer(){
+  setInterval(()=>{
+    if(!lastUpdateTime) return;
+    const sec=Math.round((Date.now()-lastUpdateTime)/1000);
+    const el=document.getElementById('last-update-ago');
+    if(!el) return;
+    if(sec<60) el.textContent=`${sec} 秒前更新`;
+    else if(sec<3600) el.textContent=`${Math.floor(sec/60)} 分鐘前更新`;
+    else el.textContent=`${Math.floor(sec/3600)} 小時前更新`;
+    // 超過 10 分鐘變紅色警示
+    el.style.color=sec>600?'#f87171':sec>300?'#fbbf24':'#4ade80';
+  },1000);
+}
+
+// ── 術語 Tooltip ──────────────────────────────────────────────────────────────
+const TERMS={
+  'OVER':    '大分：比賽總得分超過盤口線',
+  'UNDER':   '小分：比賽總得分低於盤口線',
+  'ML':      '獨贏盤：直接押某隊贏，不計讓分',
+  'O/U':     '大小分盤口：押比賽總得分高或低',
+  '蒸汽':    '短時間內盤口快速移動，代表職業資金介入',
+  '推薦':    '移動幅度大且方向明確，信號強度最高',
+  '讓分':    '主隊需讓對手若干分，勝出才算贏',
+  '快照':    '每次抓取 Pinnacle 盤口的記錄，快照越多趨勢越準',
+};
+function addTooltips(){
+  document.querySelectorAll('[data-tip]').forEach(el=>{
+    if(el._tipBound) return;
+    el._tipBound=true;
+    const tip=document.createElement('div');
+    tip.style.cssText='position:fixed;background:#0d1b2e;border:1px solid #1e3a5f;color:#e6edf3;font-size:11px;padding:6px 10px;border-radius:5px;max-width:200px;line-height:1.5;z-index:999;pointer-events:none;display:none;';
+    document.body.appendChild(tip);
+    el.addEventListener('mouseenter',ev=>{
+      const key=el.getAttribute('data-tip');
+      tip.textContent=TERMS[key]||key;
+      tip.style.display='block';
+      tip.style.left=(ev.clientX+10)+'px';
+      tip.style.top=(ev.clientY+10)+'px';
+    });
+    el.addEventListener('mousemove',ev=>{
+      tip.style.left=(ev.clientX+10)+'px';
+      tip.style.top=(ev.clientY+10)+'px';
+    });
+    el.addEventListener('mouseleave',()=>{ tip.style.display='none'; });
+  });
+}
+
+// ── STAR RATING ───────────────────────────────────────────────────────────────
 function starRating(n){
-  const max=8; // 8 snapshots = full
+  const max=8;
   const filled=Math.min(Math.round((n/max)*5),5);
   const empty=5-filled;
   const col=filled>=4?'#39ff14':filled>=2?'#fbbf24':'#4b5563';
-  return `<span class="gc-stars" style="color:${col}">${'★'.repeat(filled)}${'☆'.repeat(empty)}</span>`;
+  return `<span class="gc-stars" style="color:${col}" data-tip="快照" title="${n}筆快照">${'★'.repeat(filled)}${'☆'.repeat(empty)}</span>`;
 }
 
-// ── SIGNAL ──────────────────────────────────────────────────────────────────
+// ── SIGNAL（新門檻：≥1.5推薦 · 1.0–1.4蒸汽 · 0.5–0.9觀察）────────────────
 function calcSig(snaps, mlHint, signalData){
   const mlSig=signalData?.ml||'FLAT';
   if(!snaps||snaps.length<2) return{lbl:'觀望',d:0,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk:false};
 
   const d=+(snaps[snaps.length-1].total-snaps[0].total).toFixed(1);
   const a=Math.abs(d);
-  const snapOk=snaps.length>=3; // 改良1：快照 < 3 不給建議
+  const snapOk=snaps.length>=3;
 
-  // 信號等級（門檻不變，但 snapOk 控制是否給建議）
-  if(a>=2.0) return{lbl:d>0?'⚡ 大分推薦':'⚡ 小分推薦',d,st:true,col:d>0?'#39ff14':'#22d3ee',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:true,grade:'RECOMMEND',mlSig,mlHint,snapOk};
+  // 新門檻
+  if(a>=1.5) return{lbl:d>0?'⚡ 大分推薦':'⚡ 小分推薦',d,st:true,col:d>0?'#39ff14':'#22d3ee',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:true,grade:'RECOMMEND',mlSig,mlHint,snapOk};
   if(a>=1.0) return{lbl:d>0?'🔥 大分蒸汽':'🔥 小分蒸汽',d,st:true,col:d>0?'#f97316':'#38bdf8',pick:d>0?'OVER':'UNDER',cls:d>0?'s-over':'s-under',rec:false,grade:'STEAM',mlSig,mlHint,snapOk};
-  if(a>=0.5) return{lbl:d>0?'↑ 小蒸汽(大)':'↓ 小蒸汽(小)',d,st:false,col:d>0?'#fb923c':'#7dd3fc',pick:null,cls:'',rec:false,grade:'LEAN',mlSig,mlHint,snapOk};
+  if(a>=0.5) return{lbl:d>0?'👁 大分觀察':'👁 小分觀察',d,st:false,col:'#64748b',pick:null,cls:'',rec:false,grade:'WATCH',mlSig,mlHint,snapOk};
   return{lbl:'觀望',d,st:false,col:'#4b5563',pick:null,cls:'',rec:false,grade:'FLAT',mlSig,mlHint,snapOk};
 }
 
-// ── ENTRY & BET SUGGESTION ──────────────────────────────────────────────────
+// ── ENTRY & BET SUGGESTION ────────────────────────────────────────────────────
 function calcEnt(snaps, mins, s, g){
   if(mins<=0) return{lbl:'進行中',rdy:false,totalBet:null,mlBet:null,reason:null};
   if(mins<20) return{lbl:'已過期', rdy:false,totalBet:null,mlBet:null,reason:null};
-
-  // 改良1：快照不足，給出提示但不建議進場
-  if(!s.snapOk){
-    return{lbl:'觀察中',rdy:false,totalBet:null,mlBet:null,reason:`快照僅 ${snaps.length} 筆，需 ≥3 筆才給建議`};
-  }
+  if(!s.snapOk) return{lbl:'觀察中',rdy:false,totalBet:null,mlBet:null,reason:`快照僅 ${snaps.length} 筆，需 ≥3 筆才給建議`};
 
   const cur=snaps.length?snaps[snaps.length-1].total:null;
 
-  // 改良2：連續 3 筆都 < 0.1 才算真正停滯（而非只看最後兩筆）
-  let settled=true;
-  let settledCount=0;
+  // 連續停滯判斷
+  let settled=true, settledCount=0;
   if(snaps.length>=2){
-    // 從最新往前看，連續幾筆沒有變動
     for(let i=snaps.length-1;i>=1;i--){
-      const diff=Math.abs(snaps[i].total-snaps[i-1].total);
-      if(diff<0.1) settledCount++;
+      if(Math.abs(snaps[i].total-snaps[i-1].total)<0.1) settledCount++;
       else break;
     }
-    // 需要連續 2 筆以上沒動才算停滯（最近3筆快照都沒變）
     if(settledCount<2) settled=false;
   }
 
-  // 改良3：開賽時間加權
-  // 距開賽 2–8 小時 = 最佳窗口（加分）
-  // 距開賽 > 12 小時 = 太早，信號可能被抵消（降級）
-  // 距開賽 < 2 小時 = 太晚，風險高
-  let timeGrade='ok'; // ok / early / late
-  if(mins>720)      timeGrade='early'; // 12 小時以上
-  else if(mins>480) timeGrade='watch'; // 8–12 小時
-  else if(mins>=120&&mins<=480) timeGrade='best'; // 2–8 小時最佳
-  else if(mins>=20&&mins<120)  timeGrade='late';  // 20 分–2 小時
+  // 開賽時間加權
+  let timeGrade='ok';
+  if(mins>720)           timeGrade='early';
+  else if(mins>480)      timeGrade='watch';
+  else if(mins>=120)     timeGrade='best';
+  else if(mins>=20)      timeGrade='late';
+
+  let totalBet=null;
+  if(s.grade==='RECOMMEND'||s.grade==='STEAM'){
+    if(timeGrade==='early'){
+      totalBet={label:s.d>0?`大分 Over ${cur} 方向`:`小分 Under ${cur} 方向`,col:s.col,grade:s.rec?'⚡ 推薦':'🔥 蒸汽',settled,timeNote:'距開賽超過 12 小時，持續觀察',earlyOnly:true};
+    } else {
+      totalBet={label:s.d>0?`押大分 Over ${cur}`:`押小分 Under ${cur}`,col:s.col,grade:s.rec?'⚡ 推薦':'🔥 蒸汽',settled,
+        timeNote:timeGrade==='best'?'⭐ 最佳進場窗口（2–8小時）':timeGrade==='late'?'⚠ 距開賽較近，注意流動性':'距開賽 8–12 小時，可觀察',earlyOnly:false};
+    }
+  }
+
+  let mlBet=null;
+  const mlSig=s.mlSig||'FLAT';
+  if(g&&mlSig!=='FLAT'){
+    const home=(g.home||'').split(' ').pop();
+    const away=(g.away||'').split(' ').pop();
+    const mlD=g.delta?.ml||0;
+    if(mlSig==='STEAM_HOME') mlBet={label:`押客隊 ${away} 獨贏`,col:'#c084fc',hint:`主隊賠率縮水 ${mlD}，鯊魚資金押客隊`};
+    else if(mlSig==='STEAM_AWAY') mlBet={label:`押主隊 ${home} 獨贏`,col:'#4ade80',hint:`主隊賠率上升 +${mlD}，鯊魚資金押主隊`};
+  }
+
+  const hasBet=totalBet||mlBet;
+  if(!hasBet) return{lbl:'觀望',rdy:false,totalBet,mlBet,reason:null};
+  if(totalBet?.earlyOnly) return{lbl:'觀察中',rdy:false,totalBet,mlBet,reason:totalBet.timeNote};
+  if(totalBet&&!settled) return{lbl:'等待停滯',rdy:false,totalBet,mlBet,reason:`需連續 2 筆不變動才確認停滯（目前 ${settledCount} 筆）`};
+  return{lbl:'進場',rdy:true,totalBet,mlBet,reason:totalBet?.timeNote||null};
+}
 
   // 大小分建議
   let totalBet=null;
