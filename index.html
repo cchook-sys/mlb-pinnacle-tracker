@@ -589,6 +589,15 @@ function passFilter(s, e){
   return true;
 }
 
+// ── TIME TO GAME ─────────────────────────────────────────────────────────────
+function timeToGame(mins){
+  if(mins<=0)   return {txt:'🔴 進行中',   col:'#f87171'};
+  if(mins<60)   return {txt:`${mins}分後開賽`, col:'#f87171'};
+  if(mins<120)  return {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽`, col:'#fbbf24'};
+  if(mins<=480) return {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽 ⭐`, col:'#4ade80'};
+  return        {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽`, col:'#374151'};
+}
+
 // ── STEAM SCORE 1–10 ─────────────────────────────────────────────────────────
 function steamScore(s, snaps, mins){
   const a=Math.abs(s.d);
