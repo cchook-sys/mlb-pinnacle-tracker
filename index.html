@@ -337,6 +337,10 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 <div class="tabbar">
   <button class="tab on" id="t1" onclick="swTab('today')">📡 今日盤口</button>
   <button class="tab" id="t2" onclick="swTab('history')">📊 昨日結算</button>
+  <button class="tab" id="t3" onclick="swTab('summary')" style="position:relative;">
+    🌙 睡前總結
+    <span id="summary-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:8px;font-weight:800;padding:1px 4px;border-radius:8px;"></span>
+  </button>
   <span style="flex:1;"></span>
   <span id="last-update-ago" style="font-size:10px;color:var(--dim);align-self:center;padding-right:4px;"></span>
 </div>
@@ -417,7 +421,24 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 
 </div><!-- /app -->
 
-<!-- PARLAY MODAL -->
+<!-- SUMMARY VIEW -->
+<div class="main-history" id="vs" style="display:none;">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;flex:1;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.4);">
+    <div style="padding:14px 18px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;background:#161b22;border-radius:12px 12px 0 0;">
+      <div>
+        <div style="font-size:15px;font-weight:800;color:#cdd9e5;">🌙 睡前下注總結</div>
+        <div style="font-size:10px;color:#545d68;margin-top:2px;">台灣時間 22:00 前查看 · 針對今日場次產生推薦</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="copySummary()" style="font-size:10px;font-weight:700;padding:5px 12px;border-radius:5px;border:1px solid #30363d;background:#1c2333;color:#768390;cursor:pointer;font-family:inherit;" id="copy-summary-btn">📋 複製清單</button>
+        <button onclick="fetchSummary()" style="font-size:10px;font-weight:700;padding:5px 12px;border-radius:5px;border:1px solid #30363d;background:#1c2333;color:#768390;cursor:pointer;font-family:inherit;">↺ 重新整理</button>
+      </div>
+    </div>
+    <div id="summary-content" style="padding:16px 18px;">
+      <div style="text-align:center;padding:40px;color:#545d68;font-size:12px;">載入中...</div>
+    </div>
+  </div>
+</div>
 <div class="modal-bg" id="modal" onclick="if(event.target===this)closeParlay()">
   <div class="modal">
     <div class="modal-head">
@@ -568,13 +589,97 @@ function passFilter(s, e){
   return true;
 }
 
-// ── TIME TO GAME ─────────────────────────────────────────────────────────────
-function timeToGame(mins){
-  if(mins<=0)   return {txt:'🔴 進行中',   col:'#f87171'};
-  if(mins<60)   return {txt:`${mins}分後開賽`, col:'#f87171'};
-  if(mins<120)  return {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽`, col:'#fbbf24'};
-  if(mins<=480) return {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽 ⭐`, col:'#4ade80'};
-  return        {txt:`${Math.floor(mins/60)}h${String(mins%60).padStart(2,'0')}m 後開賽`, col:'#374151'};
+// ── STEAM SCORE 1–10 ─────────────────────────────────────────────────────────
+function steamScore(s, snaps, mins){
+  const a=Math.abs(s.d);
+  const jd=Math.abs(s.juiceDelta||0);
+
+  // 基礎分：移動幅度（最重要）
+  let base=0;
+  if(a>=2.0)      base=8;
+  else if(a>=1.5) base=7;
+  else if(a>=1.0) base=5;
+  else if(a>=0.5) base=3;
+  else if(jd>=10) base=2; // 賠率有移動
+  else             base=1;
+
+  // 加分條件
+  let bonus=0;
+  if(s.mlSig!=='FLAT')            bonus+=1;   // ML 同步移動（銳錢確認）
+  if(snaps.length>=5)             bonus+=0.5; // 快照充足，趨勢可靠
+  if(mins>=120&&mins<=480)        bonus+=0.5; // 最佳進場窗口
+  if(s.rec&&s.mlSig!=='FLAT')     bonus+=1;   // 雙重確認信號
+
+  // 停滯確認加分
+  let settled=false;
+  if(snaps.length>=2){
+    let sc=0;
+    for(let i=snaps.length-1;i>=1;i--){
+      if(Math.abs(snaps[i].total-snaps[i-1].total)<0.1)sc++;
+      else break;
+    }
+    if(sc>=2){bonus+=0.5;settled=true;}
+  }
+
+  const score=Math.min(Math.round((base+bonus)*10)/10, 10);
+  const col=score>=8?'#39ff14':score>=6?'#ffb74d':score>=4?'#f0b429':'#545d68';
+  const label=score>=8?'極強':score>=6?'強':score>=4?'中等':score>=2?'弱':'觀察';
+  return{score, col, label, settled};
+}
+
+// ── ENTRY REASON ──────────────────────────────────────────────────────────────
+// 把信號翻譯成人話
+function entryReason(s, e, g, snaps, mins){
+  const reasons=[];
+  const warnings=[];
+  const a=Math.abs(s.d);
+  const home=(g.home||'').split(' ').pop();
+  const away=(g.away||'').split(' ').pop();
+
+  // 主要原因
+  if(s.rec){
+    reasons.push(s.d>0
+      ? `Pinnacle 大小分線持續上移 ${s.d>0?'+':''}${s.d}，市場資金明顯押大分`
+      : `Pinnacle 大小分線持續下移 ${s.d}，市場資金明顯押小分`);
+  } else if(s.st){
+    reasons.push(s.d>0
+      ? `大小分上移 ${s.d>0?'+':''}${s.d}，出現蒸汽信號，有資金流入大分`
+      : `大小分下移 ${s.d}，出現蒸汽信號，有資金流入小分`);
+  } else if(s.grade==='JUICE'){
+    reasons.push(`總分盤口沒有移動，但賠率調整了 ${s.juiceDelta>0?'+':''}${s.juiceDelta} 點，莊家在微調賠率平衡`);
+  } else if(s.grade==='WATCH'){
+    reasons.push(`盤口小幅移動 ${s.d>0?'+':''}${s.d}，尚未達蒸汽門檻（需 ≥ 1.0）`);
+  } else {
+    reasons.push('盤口沒有明顯移動，資金方向不明確');
+  }
+
+  // ML 信號補充
+  if(s.mlSig==='STEAM_HOME'){
+    reasons.push(`主隊 ${home} 賠率縮水 ${g.delta?.ml||0} 點 → 鯊魚資金押客隊 ${away}（逆向信號）`);
+  } else if(s.mlSig==='STEAM_AWAY'){
+    reasons.push(`主隊 ${home} 賠率上升 ${g.delta?.ml||0} 點 → 鯊魚資金押主隊 ${home}`);
+  }
+
+  // 銳錢 vs 公眾錢
+  if(a>=0.5 && s.mlSig!=='FLAT'){
+    reasons.push('大小分 + 獨贏同步移動 → 確認為銳錢信號（職業資金介入）');
+  } else if(a>=0.5 && s.mlSig==='FLAT'){
+    warnings.push('大小分移動但獨贏未同步 → 可能為公眾資金，非純銳錢');
+  }
+
+  // 時間警示
+  if(mins>720)       warnings.push('距開賽超過 12 小時，信號可能還會繼續變化');
+  else if(mins<120&&mins>=20) warnings.push('距開賽不到 2 小時，流動性降低，謹慎進場');
+  else if(mins>=120&&mins<=480) reasons.push('目前處於最佳進場窗口（2–8 小時前）');
+
+  // 快照不足
+  if(snaps.length<3) warnings.push(`快照只有 ${snaps.length} 筆，樣本不足，建議等累積 5 筆以上`);
+
+  // 停滯狀態
+  if(e.lbl==='進場') reasons.push('盤口已停滯，信號確認，可考慮進場');
+  else if(e.lbl==='等待停滯') warnings.push('盤口仍在移動中，建議等停滯後再進場');
+
+  return{reasons, warnings};
 }
 
 // ── ENERGY BAR ───────────────────────────────────────────────────────────────
@@ -798,6 +903,15 @@ async function fetchData(){
     if(selId){const g=games.find(g=>g.game_id===selId);if(g)renderDetail(g);}
     fetchStats();
     fetchCorrections();
+    // 背景更新 summary badge
+    fetch(API+'/summary').then(r=>r.json()).then(d=>{
+      const badge=document.getElementById('summary-badge');
+      if(badge&&d.recommendations?.length>0){
+        badge.textContent=d.recommendations.length;
+        badge.style.display='block';
+        summaryData=d;
+      }
+    }).catch(()=>{});
   }catch(e){
     document.getElementById('si').innerHTML='<span style="color:#f87171">✕ '+e.message+'</span>';
     document.getElementById('glist').innerHTML=`<div style="padding:30px 14px;text-align:center;color:#f87171;font-size:12px;">連線失敗<br><a href="${API}" target="_blank" style="color:#3b82f6;font-size:10px;margin-top:6px;display:block;">喚醒後端 →</a></div>`;
@@ -968,6 +1082,11 @@ function renderList(){
         <span style="color:#21262d;">VS</span>
         ${home.split(' ').pop()}
         ${hotBadge}
+        ${(()=>{
+          const ss=steamScore(s,snaps,mins);
+          if(ss.score<4) return '';
+          return `<span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:3px;background:${ss.col}12;color:${ss.col};border:1px solid ${ss.col}25;">${ss.score}/10</span>`;
+        })()}
         ${s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(57,255,20,.12);color:#39ff14;border:1px solid rgba(57,255,20,.25);">⚡推薦</span>':''}
         ${s.st&&!s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(255,183,77,.1);color:#ffb74d;border:1px solid rgba(255,183,77,.25);">🔥蒸汽</span>':''}
         ${s.mlSig!=='FLAT'?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(210,168,255,.1);color:#d2a8ff;border:1px solid rgba(210,168,255,.25);">🦈獨贏</span>':''}
@@ -1027,6 +1146,8 @@ function renderDetail(g){
   const dstr=(dt.getMonth()+1).toString().padStart(2,'0')+'/'+(dt.getDate()).toString().padStart(2,'0');
   const trend=trendText(snaps,s,g);
   const mlD=g.delta?.ml||0;
+  const ss=steamScore(s,snaps,mins);
+  const reason=entryReason(s,e,g,snaps,mins);
 
   // ── Decision Box（最醒目的決策區，置頂）─────────────────────────────────
   let conclusionHtml='';
@@ -1078,6 +1199,16 @@ function renderDetail(g){
           ${s.d!==0?`<span style="margin-left:8px;font-weight:700;color:${s.col};">${s.lbl} ${s.d>0?'▲+':'▼'}${Math.abs(s.d)}</span>`:''}
           ${s.mlSig!=='FLAT'?`<span style="margin-left:8px;color:#d2a8ff;">🦈 獨贏信號</span>`:''}
         </div>
+        <!-- Steam Score -->
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+          <div style="display:flex;align-items:center;gap:6px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:5px 12px;">
+            <span style="font-size:10px;color:#545d68;letter-spacing:1px;">蒸汽強度</span>
+            <span style="font-size:22px;font-weight:900;color:${ss.col};font-family:monospace;">${ss.score}</span>
+            <span style="font-size:10px;font-weight:700;color:${ss.col};">/10</span>
+            <span style="font-size:11px;font-weight:700;color:${ss.col};padding:1px 7px;border-radius:3px;background:${ss.col}15;border:1px solid ${ss.col}30;">${ss.label}</span>
+          </div>
+          <div style="font-size:10px;color:#545d68;">${g.snapshot_count||0} 快照 ${starRating(g.snapshot_count||0)}</div>
+        </div>
       </div>
       <button style="background:${e.rdy?'#da3633':e.lbl==='等待停滯'?'#5a4000':'#21262d'};
         color:${e.rdy?'#fff':e.lbl==='等待停滯'?'#f0b429':'#768390'};
@@ -1110,6 +1241,21 @@ function renderDetail(g){
     <!-- 大折線圖（主角） -->
     <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 16px;margin-bottom:12px;">
       <canvas id="lc" style="width:100%!important;height:240px!important;"></canvas>
+    </div>
+
+    <!-- 進場理由說明（人話版） -->
+    <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+      <div style="font-size:9px;color:#545d68;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">📋 信號解讀</div>
+      ${reason.reasons.map(r=>`
+        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">
+          <span style="color:#56d364;font-size:11px;flex-shrink:0;margin-top:1px;">✓</span>
+          <span style="font-size:11px;color:#cdd9e5;line-height:1.5;">${r}</span>
+        </div>`).join('')}
+      ${reason.warnings.map(w=>`
+        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">
+          <span style="color:#f0b429;font-size:11px;flex-shrink:0;margin-top:1px;">⚠</span>
+          <span style="font-size:11px;color:#a8956b;line-height:1.5;">${w}</span>
+        </div>`).join('')}
     </div>
 
     <!-- 關鍵數據（精簡 4格） -->
@@ -1231,12 +1377,15 @@ function renderDetail(g){
 
 // ── TAB ───────────────────────────────────────────────────────────────────────
 function swTab(t){
-  const isT=t==='today';
+  const isT=t==='today', isH=t==='history', isS=t==='summary';
   document.getElementById('vt').style.display=isT?'flex':'none';
-  document.getElementById('vh').style.display=isT?'none':'flex';
+  document.getElementById('vh').style.display=isH?'flex':'none';
+  document.getElementById('vs').style.display=isS?'flex':'none';
   document.getElementById('t1').classList.toggle('on',isT);
-  document.getElementById('t2').classList.toggle('on',!isT);
-  if(!isT)fetchHist();
+  document.getElementById('t2').classList.toggle('on',isH);
+  document.getElementById('t3').classList.toggle('on',isS);
+  if(isH) fetchHist();
+  if(isS) fetchSummary();
 }
 
 // ── CORRECTIONS ───────────────────────────────────────────────────────────────
@@ -1265,6 +1414,185 @@ function toggleCorr(){
   corrOpen=!corrOpen;
   document.getElementById('corr-body').style.display=corrOpen?'block':'none';
   document.getElementById('corr-arr').textContent=corrOpen?'▼':'▶';
+}
+
+// ── SUMMARY ───────────────────────────────────────────────────────────────────
+let summaryData=null;
+
+async function fetchSummary(){
+  const el=document.getElementById('summary-content');
+  el.innerHTML='<div style="text-align:center;padding:40px;color:#545d68;font-size:12px;"><span class="spin" style="display:block;font-size:24px;margin-bottom:8px;">↺</span>計算中...</div>';
+  try{
+    const r=await fetch(API+'/summary');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    summaryData=await r.json();
+    renderSummary(summaryData);
+    // 有推薦就顯示 badge
+    const badge=document.getElementById('summary-badge');
+    if(badge&&summaryData.recommendations?.length>0){
+      badge.textContent=summaryData.recommendations.length;
+      badge.style.display='block';
+    }
+  }catch(e){
+    el.innerHTML=`<div style="text-align:center;padding:30px;color:#ff7b72;font-size:12px;">載入失敗：${e.message}</div>`;
+  }
+}
+
+function renderSummary(data){
+  const el=document.getElementById('summary-content');
+  const recs=data.recommendations||[];
+  const watches=data.watch_list||[];
+  const hist=data.historical_ref||{};
+  const fo2=n=>n==null?'—':n>0?'+'+n:''+n;
+
+  let html='';
+
+  // 時間說明
+  html+=`<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <div style="font-size:11px;color:#768390;">產生時間：${data.taiwan_time||'—'}</div>
+      <div style="font-size:10px;color:#374151;margin-top:2px;">共掃描 ${data.total_games||0} 場 · 蒸汽強度 ≥ 5 + 有推算方向才列入推薦</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:10px;color:#545d68;">近30天歷史參考</div>
+      <div style="font-size:13px;font-weight:800;color:${(hist.rec_wr||0)>=55?'#56d364':(hist.rec_wr||0)>=45?'#f0b429':'#ff7b72'};">
+        推薦勝率 ${hist.rec_wr||0}% <span style="font-size:9px;color:#374151;">(${hist.total||0}場)</span>
+      </div>
+      <div style="font-size:10px;color:${(hist.roi||0)>=0?'#56d364':'#ff7b72'};">ROI ${fo2(hist.roi||0)}%</div>
+    </div>
+  </div>`;
+
+  // 推薦場次
+  if(recs.length===0){
+    html+=`<div style="text-align:center;padding:30px;background:#0d1117;border-radius:8px;border:1px dashed #21262d;margin-bottom:14px;">
+      <div style="font-size:20px;margin-bottom:6px;">😴</div>
+      <div style="font-size:13px;color:#545d68;font-weight:600;">今日尚無推薦場次</div>
+      <div style="font-size:11px;color:#374151;margin-top:4px;">蒸汽強度 ≥ 5 且有明確方向才會列入<br>稍後再試，或等快照累積更多</div>
+    </div>`;
+  } else {
+    html+=`<div style="font-size:9px;color:#39ff14;letter-spacing:2px;font-weight:700;margin-bottom:8px;">⚡ 今日推薦（${recs.length}場）</div>`;
+    recs.forEach((g,i)=>{
+      const home=(g.home||'').split(' ').pop();
+      const away=(g.away||'').split(' ').pop();
+      const scoreCol=g.steam_score>=8?'#39ff14':g.steam_score>=6?'#ffb74d':'#f0b429';
+      const pickCol=g.pick?.includes('OVER')?'#ffb74d':'#79c0ff';
+      const sharpBadge=g.sharp?'<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(86,211,100,.1);color:#56d364;border:1px solid rgba(86,211,100,.25);">💎 銳錢</span>':'<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#0d1117;color:#374151;border:1px solid #21262d;">👥 公眾</span>';
+      const mlBadge=g.ml_signal!=='FLAT'?`<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(210,168,255,.1);color:#d2a8ff;border:1px solid rgba(210,168,255,.25);">🦈 獨贏同步</span>`:'';
+      const settledBadge=g.settled?'<span style="font-size:9px;color:#56d364;">✓ 已停滯</span>':'<span style="font-size:9px;color:#f0b429;">⏳ 移動中</span>';
+      const hrs=Math.floor(g.minutes_to_game/60);
+      const minsLeft=g.minutes_to_game%60;
+      const timeCol=g.minutes_to_game<=480&&g.minutes_to_game>=120?'#56d364':g.minutes_to_game<120?'#f0b429':'#545d68';
+
+      html+=`<div style="background:#0d1117;border:1px solid ${scoreCol}25;border-left:3px solid ${scoreCol};border-radius:8px;padding:14px;margin-bottom:10px;position:relative;">
+        <!-- 強度分數 右上角 -->
+        <div style="position:absolute;top:12px;right:14px;text-align:center;">
+          <div style="font-size:28px;font-weight:900;color:${scoreCol};font-family:monospace;line-height:1;">${g.steam_score}</div>
+          <div style="font-size:8px;color:#374151;letter-spacing:1px;">/10強度</div>
+        </div>
+        <!-- 場次資訊 -->
+        <div style="font-size:15px;font-weight:900;color:#cdd9e5;margin-bottom:4px;padding-right:50px;">
+          ${away} VS ${home}
+        </div>
+        <div style="font-size:10px;color:${timeCol};font-weight:700;margin-bottom:6px;">
+          ${fet(g.commence_time)} ET · ${hrs}h${String(minsLeft).padStart(2,'0')}m 後開賽
+        </div>
+        <!-- 盤口數據 -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">
+          <div style="background:#161b22;border-radius:5px;padding:6px;text-align:center;">
+            <div style="font-size:8px;color:#374151;margin-bottom:2px;">開盤</div>
+            <div style="font-size:13px;font-weight:700;color:#545d68;font-family:monospace;">${g.open_total??'—'}</div>
+          </div>
+          <div style="background:#161b22;border-radius:5px;padding:6px;text-align:center;">
+            <div style="font-size:8px;color:#374151;margin-bottom:2px;">現盤</div>
+            <div style="font-size:13px;font-weight:700;color:#cdd9e5;font-family:monospace;">${g.close_total??'—'}</div>
+          </div>
+          <div style="background:#161b22;border-radius:5px;padding:6px;text-align:center;">
+            <div style="font-size:8px;color:#374151;margin-bottom:2px;">移動</div>
+            <div style="font-size:13px;font-weight:800;color:${g.delta>0?'#ffb74d':'#79c0ff'};font-family:monospace;">${g.delta>0?'+':''}${g.delta}</div>
+          </div>
+          <div style="background:#161b22;border-radius:5px;padding:6px;text-align:center;">
+            <div style="font-size:8px;color:#374151;margin-bottom:2px;">快照</div>
+            <div style="font-size:13px;font-weight:700;color:#545d68;font-family:monospace;">${g.snapshot_count}</div>
+          </div>
+        </div>
+        <!-- 推薦方向 -->
+        <div style="background:${pickCol}10;border:1px solid ${pickCol}25;border-radius:6px;padding:8px 12px;margin-bottom:8px;">
+          <span style="font-size:14px;font-weight:900;color:${pickCol};">📌 ${g.pick||'觀望'}</span>
+          <span style="margin-left:8px;font-size:10px;color:#545d68;">
+            ${g.pick?.includes('OVER')?`Over ${fo2(g.over_juice)}`:`Under ${fo2(g.under_juice)}`}
+          </span>
+          <span style="float:right;">${settledBadge}</span>
+        </div>
+        <!-- 標籤 -->
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          ${sharpBadge} ${mlBadge}
+          ${g.minutes_to_game>=120&&g.minutes_to_game<=480?'<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(86,211,100,.08);color:#56d364;border:1px solid rgba(86,211,100,.2);">⭐ 最佳窗口</span>':''}
+        </div>
+      </div>`;
+    });
+  }
+
+  // 觀察清單
+  if(watches.length>0){
+    html+=`<div style="font-size:9px;color:#f0b429;letter-spacing:2px;font-weight:700;margin:14px 0 8px;">👁 觀察清單（強度 3–4，需持續監控）</div>`;
+    watches.forEach(g=>{
+      const home=(g.home||'').split(' ').pop();
+      const away=(g.away||'').split(' ').pop();
+      html+=`<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="font-size:12px;font-weight:700;color:#cdd9e5;">${away} VS ${home}</span>
+          <span style="font-size:10px;color:#374151;margin-left:8px;">${fet(g.commence_time)} ET</span>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:11px;font-weight:700;color:#f0b429;">${g.steam_score}/10</span>
+          <span style="font-size:10px;color:#374151;margin-left:6px;">移動 ${g.delta>0?'+':''}${g.delta}</span>
+        </div>
+      </div>`;
+    });
+  }
+
+  // 注意事項
+  html+=`<div style="background:#0a0f1a;border:1px solid #21262d;border-radius:6px;padding:10px 14px;margin-top:14px;">
+    <div style="font-size:9px;color:#374151;letter-spacing:1px;margin-bottom:5px;">⚠ 使用提醒</div>
+    <div style="font-size:10px;color:#374151;line-height:1.7;">
+      · 蒸汽強度 ≥ 7 + 銳錢確認 = 最高優先<br>
+      · 盤口「已停滯」才是最佳進場時機<br>
+      · 建議單場注額固定，不因強度加碼<br>
+      · 此工具僅追蹤 Pinnacle 盤口，不構成投注建議
+    </div>
+  </div>`;
+
+  el.innerHTML=html;
+}
+
+function copySummary(){
+  if(!summaryData) return;
+  const recs=summaryData.recommendations||[];
+  const hist=summaryData.historical_ref||{};
+  let txt=`🌙 MLB ENTRY 睡前下注總結\n`;
+  txt+=`📅 ${summaryData.taiwan_time||''}\n`;
+  txt+=`📊 近30天推薦勝率 ${hist.rec_wr||0}% · ROI ${hist.roi>=0?'+':''}${hist.roi||0}%\n\n`;
+  if(recs.length===0){
+    txt+='今日尚無推薦場次\n';
+  } else {
+    txt+=`⚡ 今日推薦 (${recs.length}場):\n\n`;
+    recs.forEach((g,i)=>{
+      const home=(g.home||'').split(' ').pop();
+      const away=(g.away||'').split(' ').pop();
+      const hrs=Math.floor(g.minutes_to_game/60);
+      txt+=`${i+1}. ${away} VS ${home}\n`;
+      txt+=`   ⏰ ${fet(g.commence_time)} ET (${hrs}h後)\n`;
+      txt+=`   📌 ${g.pick||'觀望'} (強度 ${g.steam_score}/10)\n`;
+      txt+=`   📈 盤口移動: ${g.delta>0?'+':''}${g.delta} ${g.settled?'✓已停滯':'⏳移動中'}\n`;
+      txt+=`   ${g.sharp?'💎 銳錢信號':'👥 公眾資金'}\n\n`;
+    });
+  }
+  txt+=`— MLB Pinnacle Tracker`;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const btn=document.getElementById('copy-summary-btn');
+    if(btn){btn.textContent='✓ 已複製';btn.style.color='#56d364';btn.style.borderColor='rgba(86,211,100,.4)';
+    setTimeout(()=>{btn.textContent='📋 複製清單';btn.style.color='';btn.style.borderColor='';},2000);}
+  });
 }
 
 // ── HISTORY ───────────────────────────────────────────────────────────────────
@@ -1330,8 +1658,20 @@ function renderHist(data){
 
 // ── STATS ─────────────────────────────────────────────────────────────────────
 async function fetchStats(){
-  try{const r=await fetch(API+'/stats');if(!r.ok)return;const s=await r.json();
-    document.getElementById('sw').textContent=s.steam_total>0?s.steam_win_rate+'%':'—';}catch(_){}
+  try{
+    const r=await fetch(API+'/stats');if(!r.ok)return;
+    const s=await r.json();
+    const steamTotal=s['30d']?.total||s.steam_total||0;
+    const steamWr=s['30d']?.steam_wr||s.steam_win_rate||0;
+    const el=document.getElementById('sw');
+    if(el){
+      if(steamTotal>0){
+        el.innerHTML=`<span style="font-size:17px;">${steamWr}%</span><span style="font-size:9px;color:#545d68;display:block;line-height:1;">${steamTotal}場</span>`;
+      } else {
+        el.textContent='—';
+      }
+    }
+  }catch(_){}
 }
 
 // ── PARLAY ────────────────────────────────────────────────────────────────────
