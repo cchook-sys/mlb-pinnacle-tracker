@@ -633,8 +633,136 @@ async def get_stats():
         "roi_30d":        s30.get("roi",0),
     }
 
-@app.get("/model")
-async def get_model():
+
+@app.get("/summary")
+async def get_summary():
+    """
+    今日推薦總結（台灣時間 22:00 = ET 10:00 AM 使用）
+    篩選當天有蒸汽信號且距開賽 2–12 小時的場次
+    產生睡前下注清單
+    """
+    today    = et_date_str()
+    ts_now   = utc_now()
+    et_hour  = et_now().hour
+    docs     = await get_db()["snapshots"].find({"date": today}).sort("commence_time",1).to_list(50)
+
+    recommendations = []
+    watch_list      = []
+
+    for d in docs:
+        snaps = d.get("snapshots", [])
+        if len(snaps) < 3:
+            continue  # 快照不足，跳過
+
+        sig   = signal_from_snaps(snaps)
+        td    = sig.get("delta", 0)
+        grade = sig.get("grade", "FLAT")
+        sharp = sig.get("sharp", False)
+        ml_sig= sig.get("ml", "FLAT")
+
+        # 計算距開賽時間
+        try:
+            ct = datetime.fromisoformat(d["commence_time"].replace("Z","+00:00"))
+        except:
+            continue
+        mins_to_game = int((ct - ts_now).total_seconds() / 60)
+
+        if mins_to_game < 20:
+            continue  # 已開賽或太晚
+
+        # 計算蒸汽強度分（1–10）
+        a = abs(td)
+        base = 0
+        if a >= 2.0:      base = 8
+        elif a >= 1.5:    base = 7
+        elif a >= 1.0:    base = 5
+        elif a >= 0.5:    base = 3
+        else:
+            jd = abs(sig.get("juice_delta", 0))
+            if jd >= 10: base = 2
+            else:        base = 1
+
+        bonus = 0
+        if ml_sig != "FLAT":              bonus += 1
+        if len(snaps) >= 5:               bonus += 0.5
+        if 120 <= mins_to_game <= 480:    bonus += 0.5
+        if grade == "RECOMMEND" and ml_sig != "FLAT": bonus += 1
+
+        # 停滯判斷
+        settled = False
+        settled_count = 0
+        for i in range(len(snaps)-1, 0, -1):
+            if abs((snaps[i].get("total") or 0) - (snaps[i-1].get("total") or 0)) < 0.1:
+                settled_count += 1
+            else:
+                break
+        if settled_count >= 2:
+            bonus += 0.5
+            settled = True
+
+        steam_score = min(round(base + bonus, 1), 10)
+
+        # 推薦方向
+        pick = pick_from_signal(sig, d)
+
+        # 分類
+        item = {
+            "game_id":       d["game_id"],
+            "home":          d["home"],
+            "away":          d["away"],
+            "commence_time": d["commence_time"],
+            "minutes_to_game": mins_to_game,
+            "snapshot_count": len(snaps),
+            "delta":         td,
+            "grade":         grade,
+            "sharp":         sharp,
+            "ml_signal":     ml_sig,
+            "steam_score":   steam_score,
+            "pick":          pick,
+            "settled":       settled,
+            "settled_count": settled_count,
+            "open_total":    (snaps[0].get("total") if snaps else None),
+            "close_total":   (snaps[-1].get("total") if snaps else None),
+            "over_juice":    (snaps[-1].get("over_juice") if snaps else None),
+            "under_juice":   (snaps[-1].get("under_juice") if snaps else None),
+            "ml_home":       (snaps[-1].get("ml_home") if snaps else None),
+            "ml_away":       (snaps[-1].get("ml_away") if snaps else None),
+        }
+
+        if steam_score >= 5 and pick:
+            recommendations.append(item)
+        elif steam_score >= 3 or ml_sig != "FLAT":
+            watch_list.append(item)
+
+    # 按強度排序
+    recommendations.sort(key=lambda x: x["steam_score"], reverse=True)
+    watch_list.sort(key=lambda x: x["steam_score"], reverse=True)
+
+    # 歷史勝率參考（30天）
+    stats_docs = await get_db()["model_stats"].find({"period_days": 30}).to_list(1)
+    stats_30d  = stats_docs[0] if stats_docs else {}
+
+    return {
+        "generated_at":    ts_now.isoformat(),
+        "et_time":         et_now().strftime("%Y-%m-%d %H:%M ET"),
+        "taiwan_time":     et_now().astimezone(
+                               __import__('datetime').timezone(
+                                   __import__('datetime').timedelta(hours=8)
+                               )
+                           ).strftime("%Y-%m-%d %H:%M 台灣"),
+        "total_games":     len(docs),
+        "recommendations": recommendations[:5],   # 最多5場
+        "watch_list":      watch_list[:5],
+        "historical_ref": {
+            "period":    "近30天",
+            "win_rate":  stats_30d.get("win_rate", 0),
+            "rec_wr":    stats_30d.get("rec_wr", 0),
+            "sharp_wr":  stats_30d.get("sharp_wr", 0),
+            "roi":       stats_30d.get("roi", 0),
+            "total":     stats_30d.get("total", 0),
+        },
+    }
+
     """模型準確度看板（預計算版本，速度快）"""
     docs = await get_db()["model_stats"].find({}).sort("period_days",1).to_list(10)
     return [{"period_days": d["period_days"], "win_rate": d.get("win_rate",0),
