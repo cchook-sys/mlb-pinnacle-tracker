@@ -795,3 +795,9 @@ async def get_summary():
              "roi": d.get("roi",0), "total": d.get("total",0),
              "updated_at": d["updated_at"].isoformat() if isinstance(d.get("updated_at"),datetime) else None,
             } for d in docs]
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
