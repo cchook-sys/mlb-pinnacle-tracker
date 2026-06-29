@@ -18,22 +18,27 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 
 /* ── LAYOUT ── */
 .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
-.topbar{background:#1c2333;border-bottom:1px solid #2d3748;padding:10px 16px;flex-shrink:0;}
-.tabbar{background:#161b22;border-bottom:1px solid #21262d;padding:7px 16px;display:flex;gap:6px;flex-shrink:0;}
+.topbar{background:#1a2332;border-bottom:1px solid #2a3a52;padding:10px 16px;flex-shrink:0;}
+.tabbar{background:#111a27;border-bottom:1px solid #1e2d42;padding:7px 16px;display:flex;gap:6px;flex-shrink:0;}
 
-/* 大背景區塊（第一層：最深） */
+/* 大背景（第一層：最深） */
 .main-today{display:flex;flex:1;overflow:hidden;background:#0d1117;padding:10px;gap:10px;}
 .main-history{display:none;flex:1;overflow:hidden;flex-direction:column;background:#0d1117;padding:10px;}
 
 /* SIDEBAR（第二層：中深，左側圓角） */
+/* ── 三層顏色系統 ──
+   Layer 1（最深）：#0d1117  大背景
+   Layer 2（中）  ：#162032  側欄/右側面板
+   Layer 3（最淺）：#1e2d42  數據格/卡片內格
+─────────────────────────── */
 .sidebar{
-  background:#161b22;
-  border:1px solid #2d3748;
+  background:#162032;
+  border:1px solid #2a3a52;
   border-radius:12px;
   width:360px;flex-shrink:0;
   overflow-y:auto;
   display:flex;flex-direction:column;
-  box-shadow:0 4px 24px rgba(0,0,0,.5);
+  box-shadow:0 4px 24px rgba(0,0,0,.6);
 }
 
 /* DETAIL PANEL（第二層：右側，分上下兩區） */
@@ -41,23 +46,25 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
   flex:1;
   display:flex;
   flex-direction:column;
-  overflow:hidden;          /* 整體不滾動 */
-  background:#161b22;
-  border:1px solid #2d3748;
+  overflow:hidden;
+  background:#162032;
+  border:1px solid #2a3a52;
   border-radius:12px;
-  box-shadow:0 4px 24px rgba(0,0,0,.5);
+  box-shadow:0 4px 24px rgba(0,0,0,.6);
 }
-/* 右側頂部固定區（球隊名+進場按鈕+圖表）不滾動 */
+/* 右側頂部固定區 */
 .detail-fixed{
   flex-shrink:0;
-  padding:16px 18px 10px;
-  border-bottom:1px solid #21262d;
+  padding:16px 18px 12px;
+  border-bottom:1px solid #1e2d42;
+  background:#162032;
 }
-/* 右側底部滾動區（信號解讀+數據格+快照歷史） */
+/* 右側底部滾動區 */
 .detail-scroll{
   flex:1;
   overflow-y:auto;
   padding:12px 18px 16px;
+  background:#0f1924;
 }
 
 /* MOBILE */
@@ -374,7 +381,7 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
   <!-- SIDEBAR -->
   <div class="sidebar">
     <!-- ── 績效儀表板（信任感建立）── -->
-    <div id="perf-dash" style="padding:10px 12px;border-bottom:1px solid #21262d;background:#0d1117;display:none;">
+    <div id="perf-dash" style="padding:10px 12px;border-bottom:1px solid #21262d;background:#0f1924;display:none;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <span style="font-size:9px;color:#545d68;letter-spacing:1px;font-weight:700;">📊 歷史績效（蒸汽信號）</span>
         <span style="font-size:9px;color:#374151;" id="perf-period">近30天</span>
@@ -640,11 +647,31 @@ function drawChart(snaps, hours){
         }
       },
       scales:{
-        x:{ticks:{color:'#374151',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(30,58,95,.15)'}},
-        y:{position:'left',ticks:{color:'#38bdf8',font:{size:10},callback:v=>`${v}`},
-           grid:{color:'rgba(56,189,248,.08)'},title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}}},
-        y2:{position:'right',ticks:{color:'#fbbf24',font:{size:10},callback:v=>v>0?`+${v}`:v},
-            grid:{drawOnChartArea:false},title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}}}
+        x:{ticks:{color:'#374151',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(45,55,72,.3)'}},
+        y:{
+          position:'left',
+          ticks:{color:'#38bdf8',font:{size:10},callback:v=>`${v}`},
+          grid:{color:'rgba(56,189,248,.08)'},
+          title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}},
+          afterDataLimits(scale){
+            // 大小分軸：只顯示合理起伏，padding ±0.5
+            const r=scale.max-scale.min;
+            const pad=Math.max(r*0.15,0.3);
+            scale.min-=pad; scale.max+=pad;
+          }
+        },
+        y2:{
+          position:'right',
+          ticks:{color:'#fbbf24',font:{size:10},callback:v=>v>0?`+${v}`:v},
+          grid:{drawOnChartArea:false},
+          title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}},
+          afterDataLimits(scale){
+            // ML軸：獨立範圍，不影響大小分顯示
+            const r=scale.max-scale.min;
+            const pad=Math.max(r*0.15,5);
+            scale.min-=pad; scale.max+=pad;
+          }
+        }
       }
     }
   });
@@ -1469,7 +1496,7 @@ function renderDetail(g){
     </div>`:''}
 
     <!-- 折線圖（固定不滾動） -->
-    <div style="background:#1c2333;border:1px solid #2d3748;border-radius:8px;padding:12px 14px;">
+    <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:8px;padding:12px 14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <span style="font-size:9px;color:#545d68;letter-spacing:1px;">盤口移動走勢 · PINNACLE</span>
         <div style="display:flex;gap:4px;" id="chart-range-btns">
@@ -1502,21 +1529,21 @@ function renderDetail(g){
     <!-- 信號時間軸 -->
     ${buildSignalTimeline(snaps)}
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;">
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">開盤</div>
         <div style="font-size:16px;font-weight:900;color:#768390;font-family:monospace;">${open??'—'}</div>
       </div>
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">現盤</div>
         <div style="font-size:16px;font-weight:900;color:${s.d>0?'#ffb74d':s.d<0?'#79c0ff':'#cdd9e5'};font-family:monospace;">
           ${cur??'—'}${s.d>0?'▲':s.d<0?'▼':''}
         </div>
       </div>
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">Over</div>
         <div style="font-size:16px;font-weight:900;color:#ffb74d;font-family:monospace;">${fo(lat.over_juice)}</div>
       </div>
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">Under</div>
         <div style="font-size:16px;font-weight:900;color:#79c0ff;font-family:monospace;">${fo(lat.under_juice)}</div>
       </div>
@@ -1524,7 +1551,7 @@ function renderDetail(g){
 
     <!-- ML + 移動（次要數據） -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;">
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">主隊 ML</div>
         <div style="font-size:13px;font-weight:700;font-family:monospace;
           background:${mlD<0?'rgba(121,192,255,.1)':mlD>0?'rgba(255,183,77,.1)':'transparent'};
@@ -1533,11 +1560,11 @@ function renderDetail(g){
           ${fo(lat.ml_home)}${mlD<0?'▼':mlD>0?'▲':''}
         </div>
       </div>
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">客隊 ML</div>
         <div style="font-size:13px;font-weight:700;font-family:monospace;color:#768390;">${fo(lat.ml_away)}</div>
       </div>
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">移動幅度</div>
         <div class="${Math.abs(s.d)>=1.5?'pulse-fast':Math.abs(s.d)>=1.0?'pulse-slow':''}"
           style="font-size:13px;font-weight:900;font-family:monospace;
@@ -1546,7 +1573,7 @@ function renderDetail(g){
         </div>
         ${energyBar(s.d, s.juiceDelta)}
       </div>
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">讓分</div>
         <div style="font-size:13px;font-weight:700;font-family:monospace;color:#768390;">${fo(lat.spread_home)}</div>
       </div>
@@ -1558,7 +1585,7 @@ function renderDetail(g){
         <span>▶</span> 快照歷史 · ${snaps.length} 筆（點擊展開）
       </summary>
       ${snaps.length>0?`
-      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;overflow:hidden;margin-top:6px;">
+      <div style="background:#1e2d42;border:1px solid #2a3a52;border-radius:6px;overflow:hidden;margin-top:6px;">
         <table style="width:100%;border-collapse:collapse;font-size:10px;">
           <thead><tr style="background:#0d1117;">
             <th style="padding:4px 8px;text-align:left;color:#545d68;font-size:9px;border-bottom:1px solid #21262d;">#</th>
