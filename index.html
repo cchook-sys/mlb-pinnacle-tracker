@@ -1457,17 +1457,23 @@ function renderSummary(data){
   let html='';
 
   // 時間說明
-  html+=`<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
-    <div>
-      <div style="font-size:11px;color:#768390;">產生時間：${data.taiwan_time||'—'}</div>
-      <div style="font-size:10px;color:#374151;margin-top:2px;">共掃描 ${data.total_games||0} 場 · 蒸汽強度 ≥ 5 + 有推算方向才列入推薦</div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:10px;color:#545d68;">近30天歷史參考</div>
-      <div style="font-size:13px;font-weight:800;color:${(hist.rec_wr||0)>=55?'#56d364':(hist.rec_wr||0)>=45?'#f0b429':'#ff7b72'};">
-        推薦勝率 ${hist.rec_wr||0}% <span style="font-size:9px;color:#374151;">(${hist.total||0}場)</span>
+  const notReady=!data.taiwan_ready;
+  html+=`<div style="background:#0d1117;border:1px solid ${notReady?'#f0b429':'#21262d'};border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">
+      <div>
+        <div style="font-size:11px;color:#768390;">產生時間：${data.taiwan_time||'—'}</div>
+        <div style="font-size:10px;color:#374151;margin-top:2px;">共掃描 ${data.total_games||0} 場 · 蒸汽強度 ≥ 5 + 有推算方向才列入推薦</div>
+        ${notReady?`<div style="font-size:11px;color:#f0b429;font-weight:700;margin-top:5px;">
+          ⚠ 建議台灣時間 22:35 後查看，目前快照可能不足，準確度較低
+        </div>`:'<div style="font-size:10px;color:#56d364;margin-top:3px;">✓ 已過最佳查看時間（22:35 後）</div>'}
       </div>
-      <div style="font-size:10px;color:${(hist.roi||0)>=0?'#56d364':'#ff7b72'};">ROI ${fo2(hist.roi||0)}%</div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-size:10px;color:#545d68;">近30天歷史參考</div>
+        <div style="font-size:13px;font-weight:800;color:${(hist.rec_wr||0)>=55?'#56d364':(hist.rec_wr||0)>=45?'#f0b429':'#ff7b72'};">
+          推薦勝率 ${hist.rec_wr||0}% <span style="font-size:9px;color:#374151;">(${hist.total||0}場)</span>
+        </div>
+        <div style="font-size:10px;color:${(hist.roi||0)>=0?'#56d364':'#ff7b72'};">ROI ${fo2(hist.roi||0)}%</div>
+      </div>
     </div>
   </div>`;
 
@@ -1533,10 +1539,15 @@ function renderSummary(data){
           <span style="float:right;">${settledBadge}</span>
         </div>
         <!-- 標籤 -->
-        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:${g.warnings?.length?'6':'0'}px;">
           ${sharpBadge} ${mlBadge}
           ${g.minutes_to_game>=120&&g.minutes_to_game<=480?'<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(86,211,100,.08);color:#56d364;border:1px solid rgba(86,211,100,.2);">⭐ 最佳窗口</span>':''}
         </div>
+        <!-- 警告事項 -->
+        ${(g.warnings||[]).map(w=>`
+          <div style="font-size:10px;color:#a8956b;display:flex;align-items:flex-start;gap:5px;margin-top:3px;">
+            <span style="flex-shrink:0;">⚠</span><span>${w}</span>
+          </div>`).join('')}
       </div>`;
     });
   }
