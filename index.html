@@ -358,10 +358,21 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 
   <!-- SIDEBAR -->
   <div class="sidebar">
-    <!-- TOP SIGNAL BANNER -->
+    <!-- ── 績效儀表板（信任感建立）── -->
+    <div id="perf-dash" style="padding:10px 12px;border-bottom:1px solid #21262d;background:#0d1117;display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="font-size:9px;color:#545d68;letter-spacing:1px;font-weight:700;">📊 歷史績效（蒸汽信號）</span>
+        <span style="font-size:9px;color:#374151;" id="perf-period">近30天</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;" id="perf-grid"></div>
+    </div>
+
+    <!-- ── TOP SIGNAL BANNER ── -->
     <div class="signal-banner" id="sig-banner" style="display:none;">
+      <div style="font-size:9px;color:#545d68;letter-spacing:1px;margin-bottom:5px;font-weight:700;">🔥 今日最強信號</div>
       <div class="banner-inner" id="banner-chips"></div>
     </div>
+
     <!-- FILTER BAR -->
     <div class="filter-bar">
       <button class="fchip active" id="f-all"   onclick="setFilter('all')">全部</button>
@@ -374,6 +385,7 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
         <button class="fchip" id="f-sound" onclick="toggleSound()" title="異動提示音">🔇</button>
       </div>
     </div>
+
     <!-- CORRECTION -->
     <div class="corr-wrap" id="corr-wrap" style="display:none;">
       <div class="corr-hdr" onclick="toggleCorr()">
@@ -386,6 +398,15 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
     <div id="glist" style="flex:1;">
       <div style="padding:40px 14px;text-align:center;color:var(--dim);font-size:12px;">
         <span class="spin" style="font-size:22px;display:block;margin-bottom:8px;">↺</span>連線中...
+      </div>
+    </div>
+
+    <!-- ── 資料來源說明 ── -->
+    <div style="padding:8px 12px;border-top:1px solid #21262d;flex-shrink:0;">
+      <div style="font-size:9px;color:#374151;line-height:1.6;">
+        📡 資料來源：<span style="color:#545d68;">Pinnacle（銳盤）· The Odds API</span><br>
+        🔄 更新頻率：<span style="color:#545d68;">ET 08:00–23:00 每 30 分鐘</span><br>
+        ⚠ <span style="color:#374151;">僅供參考，不構成投注建議</span>
       </div>
     </div>
   </div>
@@ -902,13 +923,18 @@ function addTooltips(){
   });
 }
 
-// ── STAR RATING ───────────────────────────────────────────────────────────────
+// ── STAR RATING（快照品質）────────────────────────────────────────────────────
+// ★ 代表快照充足度，不代表推薦強度
+// 推薦強度請看「蒸汽強度 X/10」
 function starRating(n){
   const max=8;
   const filled=Math.min(Math.round((n/max)*5),5);
   const empty=5-filled;
-  const col=filled>=4?'#39ff14':filled>=2?'#fbbf24':'#4b5563';
-  return `<span class="gc-stars" style="color:${col}" data-tip="快照" title="${n}筆快照">${'★'.repeat(filled)}${'☆'.repeat(empty)}</span>`;
+  const col=filled>=4?'#39ff14':filled>=2?'#f0b429':'#374151';
+  const tip=filled>=4?'快照充足，趨勢可靠':filled>=2?'快照累積中':'快照不足，僅供參考';
+  return `<span title="★ = 快照品質（${n}筆）：${tip}" style="cursor:help;">
+    <span style="color:${col};font-size:9px;letter-spacing:1px;">${'★'.repeat(filled)}${'☆'.repeat(empty)}</span>
+  </span>`;
 }
 
 // ── SIGNAL（新門檻：≥1.5推薦 · 1.0–1.4蒸汽 · 0.5–0.9觀察）────────────────
@@ -1068,33 +1094,37 @@ function calcStats(){
 function renderBanner(){
   const wrap=document.getElementById('sig-banner');
   const chips=document.getElementById('banner-chips');
-  // find strongest signals
+  if(!wrap||!chips) return;
+
   const hot=games.map(g=>{
     const snaps=(g.history||[]).filter(s=>s.total!=null);
+    const mins=mu(g.commence_time);
     const s=calcSig(snaps,g.ml_hint,g.signal);
-    const e=calcEnt(snaps,mu(g.commence_time),s,g);
-    return{g,s,e,snaps};
-  }).filter(x=>x.s.st||x.s.mlSig!=='FLAT').sort((a,b)=>Math.abs(b.s.d)-Math.abs(a.s.d));
+    const e=calcEnt(snaps,mins,s,g);
+    const ss=steamScore(s,snaps,mins);
+    return{g,s,e,ss,snaps};
+  }).filter(x=>x.s.st||x.s.mlSig!=='FLAT').sort((a,b)=>b.ss.score-a.ss.score).slice(0,5);
 
   if(!hot.length){wrap.style.display='none';return;}
   wrap.style.display='block';
 
-  let html='<span style="font-size:9px;color:var(--dim);white-space:nowrap;flex-shrink:0;letter-spacing:1px;">今日最強</span>';
-  hot.slice(0,5).forEach(({g,s,e})=>{
+  const ranks=['🥇','🥈','🥉','4️⃣','5️⃣'];
+  chips.innerHTML=hot.map(({g,s,e,ss},i)=>{
     const home=(g.home||'').split(' ').pop();
     const away=(g.away||'').split(' ').pop();
-    const cur=(g.history||[]).filter(x=>x.total!=null).slice(-1)[0]?.total??g.latest?.total;
-    const bet=e.totalBet||e.mlBet;
-    const betLabel=e.totalBet?e.totalBet.label:e.mlBet?e.mlBet.label:'';
-    const cls=s.rec?'rec':s.mlSig!=='FLAT'?'ml':'steam';
-    html+=`<div class="banner-chip ${cls}" onclick="selGame('${g.game_id}')">
-      ${s.rec?'⚡':s.mlSig!=='FLAT'?'🦈':'🔥'}
-      ${away} VS ${home}
-      ${betLabel?`· <b>${betLabel}</b>`:`· ${s.lbl}`}
-      ${e.rdy?'<span style="color:#39ff14;font-size:9px;">✓</span>':''}
+    const pickLabel=e.totalBet?.label||e.mlBet?.label||s.lbl;
+    const scoreCol=ss.score>=8?'#39ff14':ss.score>=6?'#ffb74d':'#f0b429';
+    return `<div class="banner-chip ${s.rec?'rec':s.mlSig!=='FLAT'?'ml':'steam'}"
+      onclick="selGame('${g.game_id}')"
+      style="flex-direction:column;align-items:flex-start;padding:6px 10px;min-width:130px;border-radius:7px;gap:3px;">
+      <div style="display:flex;align-items:center;gap:5px;width:100%;">
+        <span>${ranks[i]}</span>
+        <span style="font-size:10px;font-weight:800;">${away} VS ${home}</span>
+        <span style="margin-left:auto;font-size:12px;font-weight:900;color:${scoreCol};">${ss.score}</span>
+      </div>
+      <div style="font-size:9px;opacity:.8;">${pickLabel} ${e.rdy?'✓':''}</div>
     </div>`;
-  });
-  chips.innerHTML=html;
+  }).join('');
 }
 
 // ── GAME LIST ─────────────────────────────────────────────────────────────────
@@ -1260,6 +1290,47 @@ function backToList(){
 }
 
 // ── DETAIL ────────────────────────────────────────────────────────────────────
+// ── 信號時間軸 ────────────────────────────────────────────────────────────────
+function buildSignalTimeline(snaps){
+  if(!snaps||snaps.length<2) return '';
+  const fmt=ts=>new Date(ts).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
+  const events=[];
+
+  snaps.forEach((s2,i)=>{
+    if(i===0){
+      events.push({time:fmt(s2.ts),label:'開盤紀錄',note:`大小分 ${s2.total??'—'}  ML ${s2.ml_home>0?'+':''}${s2.ml_home??'—'}`,col:'#374151',icon:'○'});
+      return;
+    }
+    const prev=snaps[i-1];
+    const td=s2.total!=null&&prev.total!=null?+(s2.total-prev.total).toFixed(1):0;
+    const mld=s2.ml_home!=null&&prev.ml_home!=null?Math.round(s2.ml_home-prev.ml_home):0;
+    const a=Math.abs(td);
+    if(a>=1.5)       events.push({time:fmt(s2.ts),label:'⚡ 推薦信號出現',note:`大小分 ${td>0?'+':''}${td}  現盤 ${s2.total}`,col:'#39ff14',icon:'★'});
+    else if(a>=1.0)  events.push({time:fmt(s2.ts),label:'🔥 蒸汽信號',note:`大小分 ${td>0?'+':''}${td}  現盤 ${s2.total}`,col:'#ffb74d',icon:'▲'});
+    else if(a>=0.5)  events.push({time:fmt(s2.ts),label:'盤口小幅移動',note:`移動 ${td>0?'+':''}${td}`,col:'#545d68',icon:'·'});
+    else if(Math.abs(mld)>=15) events.push({time:fmt(s2.ts),label:'🦈 獨贏異動',note:`ML ${mld>0?'+':''}${mld}  現值 ${s2.ml_home>0?'+':''}${s2.ml_home}`,col:'#d2a8ff',icon:'◆'});
+  });
+
+  const last=snaps[snaps.length-1];
+  const hasSignal=events.some(e=>e.icon==='★'||e.icon==='▲');
+  if(hasSignal) events.push({time:fmt(last.ts),label:'📌 建議確認時間點',note:`現盤 ${last.total??'—'}  共 ${snaps.length} 筆快照`,col:'#58a6ff',icon:'→'});
+  if(events.length<2) return '';
+
+  return `<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+    <div style="font-size:9px;color:#545d68;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;">⏱ 信號時間軸</div>
+    <div style="position:relative;padding-left:20px;">
+      <div style="position:absolute;left:6px;top:4px;bottom:4px;width:1px;background:linear-gradient(180deg,#21262d,#545d68,#21262d);"></div>
+      ${events.map((ev,i)=>`
+        <div style="position:relative;margin-bottom:${i<events.length-1?'10':'0'}px;">
+          <div style="position:absolute;left:-17px;top:1px;font-size:10px;color:${ev.col};font-weight:800;">${ev.icon}</div>
+          <div style="font-size:9px;color:#374151;font-family:monospace;">${ev.time}</div>
+          <div style="font-size:11px;font-weight:700;color:${ev.col};">${ev.label}</div>
+          <div style="font-size:10px;color:#545d68;">${ev.note}</div>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
 function renderDetail(g){
   const dp=document.getElementById('dpanel');
   const snaps=(g.history||[]).filter(s=>s.total!=null);
@@ -1327,15 +1398,25 @@ function renderDetail(g){
           ${s.d!==0?`<span style="margin-left:8px;font-weight:700;color:${s.col};">${s.lbl} ${s.d>0?'▲+':'▼'}${Math.abs(s.d)}</span>`:''}
           ${s.mlSig!=='FLAT'?`<span style="margin-left:8px;color:#d2a8ff;">🦈 獨贏信號</span>`:''}
         </div>
-        <!-- Steam Score -->
-        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+        <!-- Steam Score - 重新定義說明 -->
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:6px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:5px 12px;">
             <span style="font-size:10px;color:#545d68;letter-spacing:1px;">蒸汽強度</span>
             <span style="font-size:22px;font-weight:900;color:${ss.col};font-family:monospace;">${ss.score}</span>
             <span style="font-size:10px;font-weight:700;color:${ss.col};">/10</span>
             <span style="font-size:11px;font-weight:700;color:${ss.col};padding:1px 7px;border-radius:3px;background:${ss.col}15;border:1px solid ${ss.col}30;">${ss.label}</span>
           </div>
-          <div style="font-size:10px;color:#545d68;">${g.snapshot_count||0} 快照 ${starRating(g.snapshot_count||0)}</div>
+          <div style="font-size:9px;color:#374151;line-height:1.5;">
+            快照品質 ${starRating(g.snapshot_count||0)}<br>
+            <span style="color:#374151;">★ = 快照數 · 非推薦強度</span>
+          </div>
+        </div>
+        <!-- 蒸汽強度計分說明 -->
+        <div style="margin-top:6px;font-size:9px;color:#374151;background:#0d1117;border-radius:4px;padding:5px 8px;display:flex;gap:10px;flex-wrap:wrap;">
+          <span>移動幅度: <b style="color:#545d68;">${Math.abs(s.d)>=1.5?'+8':Math.abs(s.d)>=1.0?'+5':Math.abs(s.d)>=0.5?'+3':'+1'}</b></span>
+          <span>ML同步: <b style="color:${s.mlSig!=='FLAT'?'#56d364':'#374151'}">${s.mlSig!=='FLAT'?'+1':'—'}</b></span>
+          <span>快照充足: <b style="color:${(g.snapshot_count||0)>=5?'#56d364':'#374151'}">${(g.snapshot_count||0)>=5?'+0.5':'—'}</b></span>
+          <span>停滯確認: <b style="color:${ss.settled?'#56d364':'#374151'}">${ss.settled?'+0.5':'等待中'}</b></span>
         </div>
       </div>
       <button style="background:${e.rdy?'#da3633':e.lbl==='等待停滯'?'#5a4000':'#21262d'};
@@ -1394,6 +1475,9 @@ function renderDetail(g){
           <span style="font-size:11px;color:#a8956b;line-height:1.5;">${w}</span>
         </div>`).join('')}
     </div>
+
+    <!-- 信號時間軸 -->
+    ${buildSignalTimeline(snaps)}
 
     <!-- 關鍵數據（精簡 4格） -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;">
@@ -1791,20 +1875,53 @@ function renderHist(data){
 }
 
 // ── STATS ─────────────────────────────────────────────────────────────────────
+// ── 績效儀表板 ────────────────────────────────────────────────────────────────
+function renderPerfDash(s){
+  const dash=document.getElementById('perf-dash');
+  const grid=document.getElementById('perf-grid');
+  if(!dash||!grid) return;
+
+  const d30=s['30d']||{};
+  const d7=s['7d']||{};
+  const wins=d30.wins||0;
+  const losses=d30.losses||0;
+  const pushes=d30.pushes||0;
+  const wr=d30.win_rate||0;
+  const roi=d30.roi||0;
+  const recWr=d30.rec_wr||0;
+  const sharpWr=d30.sharp_wr||0;
+  const total=d30.total||0;
+
+  if(total===0){dash.style.display='none';return;}
+  dash.style.display='block';
+
+  const wrCol=wr>=58?'#39ff14':wr>=50?'#f0b429':'#ff7b72';
+  const roiCol=roi>=0?'#56d364':'#ff7b72';
+
+  grid.innerHTML=[
+    {l:'近30天',v:`${wins}W ${losses}L`,c:'#cdd9e5',s:'10px'},
+    {l:'勝率',v:`${wr}%`,c:wrCol,s:'16px'},
+    {l:'ROI',v:`${roi>=0?'+':''}${roi}%`,c:roiCol,s:'16px'},
+    {l:'推薦勝率',v:`${recWr}%`,c:recWr>=58?'#39ff14':recWr>=50?'#f0b429':'#ff7b72',s:'16px'},
+  ].map(item=>`
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:5px;padding:6px 5px;text-align:center;">
+      <div style="font-size:8px;color:#374151;margin-bottom:2px;white-space:nowrap;">${item.l}</div>
+      <div style="font-size:${item.s};font-weight:900;color:${item.c};font-family:monospace;line-height:1.2;">${item.v}</div>
+    </div>`).join('');
+
+  // 更新頂部統計欄
+  const sw=document.getElementById('sw');
+  if(sw&&total>0){
+    sw.innerHTML=`<span style="font-size:17px;">${wr}%</span><span style="font-size:9px;color:#545d68;display:block;line-height:1;">${total}場</span>`;
+  }
+}
+
 async function fetchStats(){
   try{
-    const r=await fetch(API+'/stats');if(!r.ok)return;
+    const r=await fetch(API+'/stats');
+    if(!r.ok) return;
     const s=await r.json();
-    const steamTotal=s['30d']?.total||s.steam_total||0;
-    const steamWr=s['30d']?.steam_wr||s.steam_win_rate||0;
-    const el=document.getElementById('sw');
-    if(el){
-      if(steamTotal>0){
-        el.innerHTML=`<span style="font-size:17px;">${steamWr}%</span><span style="font-size:9px;color:#545d68;display:block;line-height:1;">${steamTotal}場</span>`;
-      } else {
-        el.textContent='—';
-      }
-    }
+    renderPerfDash(s);
   }catch(_){}
 }
 
