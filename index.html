@@ -326,6 +326,9 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
         <div class="stat"><div class="stl">蒸汽勝率</div><div class="stv" id="sw" style="color:#a78bfa">—</div></div>
       </div>
       <button class="btn btn-green" onclick="openParlay()">🎯 <span class="btn-txt">過關分析</span></button>
+      <button onclick="document.getElementById('glossary').classList.add('open')"
+        style="background:none;border:1px solid #30363d;color:#768390;padding:7px 10px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:900;font-family:inherit;"
+        title="術語說明">？</button>
       <button class="btn btn-blue" id="rb" onclick="fetchData()">
         <span id="ri">↺</span><span class="btn-txt" id="rt">更新盤口</span>
       </button>
@@ -439,6 +442,18 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
     </div>
   </div>
 </div>
+
+<!-- GLOSSARY MODAL -->
+<div class="modal-bg" id="glossary" onclick="if(event.target===this)this.classList.remove('open')" style="align-items:flex-start;padding:20px;">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;width:100%;max-width:520px;max-height:88vh;overflow-y:auto;margin-top:60px;box-shadow:0 20px 40px rgba(0,0,0,.6);">
+    <div style="padding:14px 18px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#161b22;z-index:1;border-radius:10px 10px 0 0;">
+      <div style="font-size:15px;font-weight:900;color:#cdd9e5;">📖 術語說明手冊</div>
+      <button onclick="document.getElementById('glossary').classList.remove('open')" style="background:none;border:none;color:#545d68;font-size:20px;cursor:pointer;font-weight:700;">✕</button>
+    </div>
+    <div style="padding:16px 18px;" id="glossary-body"></div>
+  </div>
+</div>
+
 <div class="modal-bg" id="modal" onclick="if(event.target===this)closeParlay()">
   <div class="modal">
     <div class="modal-head">
@@ -1361,24 +1376,79 @@ function renderDetail(g){
   const labels=snaps.map(s2=>new Date(s2.ts).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'}));
   chartObj=new Chart(cv,{
     data:{labels,datasets:[
-      {type:'line',label:'大小分',data:snaps.map(s2=>s2.total),
+      {type:'line',label:'大小分 (O/U)',data:snaps.map(s2=>s2.total),
        borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.07)',
-       borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#38bdf8',tension:.2,fill:true,yAxisID:'y'},
-      {type:'line',label:'主獨贏',data:snaps.map(s2=>s2.ml_home),
+       borderWidth:2.5,pointRadius:4,pointHoverRadius:7,
+       pointBackgroundColor:'#38bdf8',pointHoverBackgroundColor:'#fff',
+       pointHoverBorderColor:'#38bdf8',pointHoverBorderWidth:2,
+       tension:.2,fill:true,yAxisID:'y'},
+      {type:'line',label:'主隊獨贏 (ML)',data:snaps.map(s2=>s2.ml_home),
        borderColor:'#fbbf24',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[6,3],pointRadius:3,pointBackgroundColor:'#fbbf24',tension:.3,fill:false,yAxisID:'y2'},
+       borderWidth:1.5,borderDash:[6,3],pointRadius:3,pointHoverRadius:6,
+       pointBackgroundColor:'#fbbf24',pointHoverBackgroundColor:'#fff',
+       pointHoverBorderColor:'#fbbf24',pointHoverBorderWidth:2,
+       tension:.3,fill:false,yAxisID:'y2'},
     ]},
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
       plugins:{
-        legend:{labels:{color:'#6e7d94',font:{size:10},usePointStyle:true,pointStyleWidth:18}},
-        tooltip:{backgroundColor:'#0d1117',borderColor:'#30363d',borderWidth:1,titleColor:'#6e7d94',bodyColor:'#d1d9e6',padding:10}
+        legend:{labels:{color:'#768390',font:{size:10},usePointStyle:true,pointStyleWidth:18}},
+        tooltip:{
+          backgroundColor:'#161b22',
+          borderColor:'#30363d',
+          borderWidth:1,
+          titleColor:'#768390',
+          bodyColor:'#cdd9e5',
+          padding:12,
+          titleFont:{size:11},
+          bodyFont:{size:12},
+          callbacks:{
+            title(items){
+              return `⏰ ${items[0].label}`;
+            },
+            label(item){
+              if(item.datasetIndex===0){
+                const prev=item.dataIndex>0?item.dataset.data[item.dataIndex-1]:null;
+                const chg=prev!=null?(item.parsed.y-prev).toFixed(1):null;
+                const arrow=chg==null?'':chg>0?` ▲+${chg}`:chg<0?` ▼${chg}`:' ─';
+                return ` 大小分: ${item.parsed.y}${arrow}`;
+              } else {
+                const prev=item.dataIndex>0?item.dataset.data[item.dataIndex-1]:null;
+                const chg=prev!=null?Math.round(item.parsed.y-prev):null;
+                const arrow=chg==null?'':chg>0?` ▲+${chg}`:chg<0?` ▼${chg}`:' ─';
+                const val=item.parsed.y>0?`+${item.parsed.y}`:item.parsed.y;
+                return ` 主獨贏: ${val}${arrow}`;
+              }
+            },
+            afterBody(items){
+              // 顯示 Over/Under 賠率
+              const i=items[0].dataIndex;
+              const s2=snaps[i];
+              if(s2){
+                const oj=s2.over_juice!=null?(s2.over_juice>0?`+${s2.over_juice}`:s2.over_juice):'—';
+                const uj=s2.under_juice!=null?(s2.under_juice>0?`+${s2.under_juice}`:s2.under_juice):'—';
+                return [``, ` Over: ${oj}  |  Under: ${uj}`];
+              }
+              return [];
+            }
+          }
+        }
       },
       scales:{
-        x:{ticks:{color:'#4b5563',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(30,58,95,.2)'}},
-        y:{position:'left',ticks:{color:'#38bdf8',font:{size:10}},grid:{color:'rgba(30,58,95,.2)'},title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}}},
-        y2:{position:'right',ticks:{color:'#fbbf24',font:{size:10}},grid:{drawOnChartArea:false},title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}}}
+        x:{ticks:{color:'#374151',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(30,58,95,.15)'}},
+        y:{
+          position:'left',
+          ticks:{color:'#38bdf8',font:{size:10},callback:v=>`${v}`},
+          grid:{color:'rgba(56,189,248,.08)'},
+          title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}}
+        },
+        y2:{
+          position:'right',
+          ticks:{color:'#fbbf24',font:{size:10},callback:v=>v>0?`+${v}`:v},
+          grid:{drawOnChartArea:false},
+          title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}}
+        }
       }
     }
   });
@@ -1697,6 +1767,50 @@ async function fetchStats(){
 // ── PARLAY ────────────────────────────────────────────────────────────────────
 function openParlay(){document.getElementById('modal').classList.add('open');buildParlay();}
 function closeParlay(){document.getElementById('modal').classList.remove('open');}
+
+// ── GLOSSARY ──────────────────────────────────────────────────────────────────
+function buildGlossary(){
+  const terms=[
+    {term:'大小分 (O/U Total)',col:'#38bdf8',
+     def:'莊家預估比賽雙方合計得分的基準線。例如 8.5 表示莊家預測兩隊總得分在 8.5 分附近。',
+     eg:'Over 8.5 = 押兩隊總得分超過 8.5；Under 8.5 = 押總得分不超過 8.5'},
+    {term:'ML 獨贏 (Moneyline)',col:'#d2a8ff',
+     def:'直接押某隊勝出，不考慮讓分。正數表示賠率，負數表示需押多少才能贏 100。',
+     eg:'主隊 ML -145 → 押 145 元贏 100；客隊 ML +130 → 押 100 元贏 130'},
+    {term:'蒸汽 (Steam Move)',col:'#ffb74d',
+     def:'盤口短時間內快速移動，代表大額職業資金介入。移動 ≥ 1.0 為蒸汽，≥ 1.5 為推薦。',
+     eg:'大小分 8.5 → 9.5，移動 +1.0，觸發蒸汽信號'},
+    {term:'銳錢 (Sharp Money)',col:'#56d364',
+     def:'職業賭客的大額下注。判斷依據：大小分移動 + ML 同步移動 = 銳錢；只有大小分動 = 公眾資金。',
+     eg:'大小分 +1.5 且 ML 同步縮水 → 確認銳錢信號'},
+    {term:'快照 (Snapshot)',col:'#768390',
+     def:'每次抓取 Pinnacle 盤口的記錄，只有數值真正變動才儲存。快照越多，趨勢越可靠。',
+     eg:'5 筆以上才給進場建議，3 筆以下顯示「監控中」'},
+    {term:'蒸汽強度 1–10',col:'#39ff14',
+     def:'綜合評分：移動幅度 + ML同步性 + 快照數 + 開賽時間。5分以上才進入推薦清單。',
+     eg:'移動 +2.0 且 ML 同步 → 約 8.5/10'},
+    {term:'盤口冷卻中',col:'#f0b429',
+     def:'盤口沒有明顯移動，資金方向不明確。仍可點選查看折線圖和快照歷史，只是不給進場建議。',
+     eg:''},
+    {term:'最佳窗口 ⭐',col:'#56d364',
+     def:'距開賽 2–8 小時。此時快照夠多、盤口趨向穩定，進場賠率通常最好。',
+     eg:'台灣時間 22:35 後，下午場正進入最佳窗口'},
+    {term:'CLV 收盤線優勢',col:'#f0b429',
+     def:'進場時賠率 vs 收盤賠率的差距。在盤口收盤前以更好的賠率進場 = 正期望值。',
+     eg:'你在 Over -108 進場，收盤 Over -120 → CLV +12，長期有利'},
+    {term:'ROI (投資報酬率)',col:'#56d364',
+     def:'每注固定金額長期下注的回報率。ROI > 0 表示長期獲利，業界普遍認為 +5% 以上即為優秀。',
+     eg:'26場勝率63% ≈ ROI +17%（理論值）'},
+  ];
+  const el=document.getElementById('glossary-body');
+  if(!el) return;
+  el.innerHTML=terms.map(item=>`
+    <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #21262d;">
+      <div style="font-size:13px;font-weight:800;color:${item.col};margin-bottom:4px;">${item.term}</div>
+      <div style="font-size:11px;color:#cdd9e5;line-height:1.6;">${item.def}</div>
+      ${item.eg?`<div style="font-size:10px;color:#545d68;margin-top:4px;padding:4px 8px;background:#0d1117;border-radius:4px;border-left:2px solid ${item.col}40;">💡 ${item.eg}</div>`:''}
+    </div>`).join('');
+}
 const td2=o=>o==null?1.91:o>0?+(1+o/100).toFixed(3):+(1+100/Math.abs(o)).toFixed(3);
 
 function buildParlay(){
@@ -1767,7 +1881,7 @@ function buildParlay(){
   }).join('');
 }
 
-window.onload=fetchData;
+window.onload=()=>{ buildGlossary(); fetchData(); };
 </script>
 </body>
 </html>
