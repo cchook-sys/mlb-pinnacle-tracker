@@ -637,13 +637,21 @@ async def get_stats():
 @app.get("/summary")
 async def get_summary():
     """
-    今日推薦總結（台灣時間 22:00 = ET 10:00 AM 使用）
-    篩選當天有蒸汽信號且距開賽 2–12 小時的場次
-    產生睡前下注清單
+    今日推薦總結
+    台灣時間 22:35 後（ET 10:35 AM）最準確：
+    - 下午場距開賽約 2.5 小時（最佳窗口）
+    - 快照累積較多，移動趨勢更可靠
+    篩選：蒸汽強度 ≥ 5 + 有推算方向 + 快照 ≥ 3 筆
+    邊緣蒸汽（1.0–1.1）且無 ML 同步 → 降為觀察，不推薦
     """
     today    = et_date_str()
     ts_now   = utc_now()
-    et_hour  = et_now().hour
+    et_time  = et_now()
+    et_hour  = et_time.hour
+    et_min   = et_time.minute
+    # 台灣時間 22:35 = ET 10:35 AM
+    taiwan_ready = (et_hour > 10) or (et_hour == 10 and et_min >= 35)
+
     docs     = await get_db()["snapshots"].find({"date": today}).sort("commence_time",1).to_list(50)
 
     recommendations = []
@@ -652,7 +660,7 @@ async def get_summary():
     for d in docs:
         snaps = d.get("snapshots", [])
         if len(snaps) < 3:
-            continue  # 快照不足，跳過
+            continue
 
         sig   = signal_from_snaps(snaps)
         td    = sig.get("delta", 0)
@@ -660,7 +668,6 @@ async def get_summary():
         sharp = sig.get("sharp", False)
         ml_sig= sig.get("ml", "FLAT")
 
-        # 計算距開賽時間
         try:
             ct = datetime.fromisoformat(d["commence_time"].replace("Z","+00:00"))
         except:
@@ -668,9 +675,9 @@ async def get_summary():
         mins_to_game = int((ct - ts_now).total_seconds() / 60)
 
         if mins_to_game < 20:
-            continue  # 已開賽或太晚
+            continue
 
-        # 計算蒸汽強度分（1–10）
+        # 蒸汽強度計算
         a = abs(td)
         base = 0
         if a >= 2.0:      base = 8
@@ -702,25 +709,43 @@ async def get_summary():
 
         steam_score = min(round(base + bonus, 1), 10)
 
+        # ── 邊緣蒸汽修正（根據昨日資料）────────────────────────────
+        # 移動 1.0–1.1 且無 ML 同步 → 公眾資金為主，降為觀察
+        edge_steam = (1.0 <= a <= 1.1) and ml_sig == "FLAT"
+        if edge_steam:
+            steam_score = max(steam_score - 1.5, 2.0)  # 降分，不進推薦
+
         # 推薦方向
         pick = pick_from_signal(sig, d)
 
-        # 分類
+        # 加入警告標記
+        warnings = []
+        if edge_steam:
+            warnings.append("邊緣蒸汽且ML未同步，公眾資金可能性高，謹慎進場")
+        if not settled and steam_score >= 5:
+            warnings.append("盤口仍在移動，建議等停滯後再確認")
+        if mins_to_game > 720:
+            warnings.append("距開賽超過12小時，信號可能繼續變化")
+        if len(snaps) < 5:
+            warnings.append(f"快照僅 {len(snaps)} 筆，建議等累積 5 筆以上")
+
         item = {
-            "game_id":       d["game_id"],
-            "home":          d["home"],
-            "away":          d["away"],
-            "commence_time": d["commence_time"],
-            "minutes_to_game": mins_to_game,
+            "game_id":        d["game_id"],
+            "home":           d["home"],
+            "away":           d["away"],
+            "commence_time":  d["commence_time"],
+            "minutes_to_game":mins_to_game,
             "snapshot_count": len(snaps),
-            "delta":         td,
-            "grade":         grade,
-            "sharp":         sharp,
-            "ml_signal":     ml_sig,
-            "steam_score":   steam_score,
-            "pick":          pick,
-            "settled":       settled,
-            "settled_count": settled_count,
+            "delta":          td,
+            "grade":          grade,
+            "sharp":          sharp,
+            "ml_signal":      ml_sig,
+            "steam_score":    steam_score,
+            "pick":           pick,
+            "settled":        settled,
+            "settled_count":  settled_count,
+            "edge_steam":     edge_steam,
+            "warnings":       warnings,
             "open_total":    (snaps[0].get("total") if snaps else None),
             "close_total":   (snaps[-1].get("total") if snaps else None),
             "over_juice":    (snaps[-1].get("over_juice") if snaps else None),
@@ -729,16 +754,14 @@ async def get_summary():
             "ml_away":       (snaps[-1].get("ml_away") if snaps else None),
         }
 
-        if steam_score >= 5 and pick:
+        if steam_score >= 5 and pick and not edge_steam:
             recommendations.append(item)
-        elif steam_score >= 3 or ml_sig != "FLAT":
+        elif steam_score >= 3 or ml_sig != "FLAT" or edge_steam:
             watch_list.append(item)
 
-    # 按強度排序
     recommendations.sort(key=lambda x: x["steam_score"], reverse=True)
     watch_list.sort(key=lambda x: x["steam_score"], reverse=True)
 
-    # 歷史勝率參考（30天）
     stats_docs = await get_db()["model_stats"].find({"period_days": 30}).to_list(1)
     stats_30d  = stats_docs[0] if stats_docs else {}
 
@@ -750,8 +773,9 @@ async def get_summary():
                                    __import__('datetime').timedelta(hours=8)
                                )
                            ).strftime("%Y-%m-%d %H:%M 台灣"),
+        "taiwan_ready":    taiwan_ready,   # 台灣 22:35 後才算準確
         "total_games":     len(docs),
-        "recommendations": recommendations[:5],   # 最多5場
+        "recommendations": recommendations[:5],
         "watch_list":      watch_list[:5],
         "historical_ref": {
             "period":    "近30天",
