@@ -1505,7 +1505,10 @@ function renderDetail(g){
           <button onclick="setChartRange(99)" id="cr-99" class="cr-btn">全場</button>
         </div>
       </div>
-      <canvas id="lc" style="width:100%!important;height:200px!important;"></canvas>
+      <!-- 關鍵：外層容器固定高度，Chart.js 才能正確計算 -->
+      <div style="position:relative;height:185px;width:100%;">
+        <canvas id="lc"></canvas>
+      </div>
     </div>
   `;
 
