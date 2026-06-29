@@ -18,47 +18,62 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 
 /* ── LAYOUT ── */
 .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
-.topbar{background:#161b22;border-bottom:1px solid #30363d;padding:10px 16px;flex-shrink:0;}
-.tabbar{background:#0d1117;border-bottom:1px solid #21262d;padding:7px 16px;display:flex;gap:6px;flex-shrink:0;}
+.topbar{background:#1c2333;border-bottom:1px solid #2d3748;padding:10px 16px;flex-shrink:0;}
+.tabbar{background:#161b22;border-bottom:1px solid #21262d;padding:7px 16px;display:flex;gap:6px;flex-shrink:0;}
 
-/* Desktop: side by side / Mobile: stack */
-/* 大背景區塊（第一層） */
-.main-today{display:flex;flex:1;overflow:hidden;background:#0d1117;padding:12px;gap:10px;}
-.main-history{display:none;flex:1;overflow:hidden;flex-direction:column;background:#0d1117;padding:12px;}
+/* 大背景區塊（第一層：最深） */
+.main-today{display:flex;flex:1;overflow:hidden;background:#0d1117;padding:10px;gap:10px;}
+.main-history{display:none;flex:1;overflow:hidden;flex-direction:column;background:#0d1117;padding:10px;}
 
-/* SIDEBAR（第二層：左側圓角區塊） */
+/* SIDEBAR（第二層：中深，左側圓角） */
 .sidebar{
   background:#161b22;
-  border:1px solid #30363d;
+  border:1px solid #2d3748;
   border-radius:12px;
   width:360px;flex-shrink:0;
   overflow-y:auto;
   display:flex;flex-direction:column;
-  box-shadow:0 4px 20px rgba(0,0,0,.4);
+  box-shadow:0 4px 24px rgba(0,0,0,.5);
 }
 
-/* DETAIL PANEL（第二層：右側圓角區塊） */
+/* DETAIL PANEL（第二層：右側，分上下兩區） */
 .detail-panel{
-  flex:1;overflow-y:auto;
-  padding:18px 20px;
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;          /* 整體不滾動 */
   background:#161b22;
-  border:1px solid #30363d;
+  border:1px solid #2d3748;
   border-radius:12px;
-  box-shadow:0 4px 20px rgba(0,0,0,.4);
+  box-shadow:0 4px 24px rgba(0,0,0,.5);
+}
+/* 右側頂部固定區（球隊名+進場按鈕+圖表）不滾動 */
+.detail-fixed{
+  flex-shrink:0;
+  padding:16px 18px 10px;
+  border-bottom:1px solid #21262d;
+}
+/* 右側底部滾動區（信號解讀+數據格+快照歷史） */
+.detail-scroll{
+  flex:1;
+  overflow-y:auto;
+  padding:12px 18px 16px;
 }
 
-/* MOBILE: full width panels */
+/* MOBILE */
 @media(max-width:768px){
   .main-today{flex-direction:column;padding:8px;gap:8px;}
   .sidebar{width:100%;border-radius:10px;max-height:45vh;}
-  .detail-panel{padding:12px;border-radius:10px;}
+  .detail-panel{border-radius:10px;}
+  .detail-fixed{padding:12px 12px 8px;}
+  .detail-scroll{padding:8px 12px 12px;}
   .topbar-meta{display:none;}
   .stat-box{gap:6px;padding:5px 8px;}
   .stat .stv{font-size:15px;}
   .stat .stl{font-size:7px;}
   .btn-txt{display:none;}
   .main-today.detail-open .sidebar{display:none;}
-  .main-today.detail-open .detail-panel{display:flex;flex-direction:column;}
+  .main-today.detail-open .detail-panel{display:flex;}
   .mobile-back{display:flex!important;}
 }
 .mobile-back{display:none;align-items:center;gap:6px;padding:8px 14px;background:#161b22;border-radius:8px;margin:4px 8px;font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;flex-shrink:0;}
@@ -414,13 +429,16 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
   <!-- MOBILE BACK -->
   <div class="mobile-back" id="back-btn" onclick="backToList()">← 返回場次列表</div>
 
-  <!-- DETAIL -->
+  <!-- DETAIL: 分固定頂部 + 滾動底部 -->
   <div class="detail-panel" id="dpanel">
-    <div class="d-empty">
-      <div style="font-size:40px;opacity:.15">📊</div>
-      <div style="font-size:13px;color:var(--muted);font-weight:600;">點擊左側場次查看詳細分析</div>
-      <div style="font-size:11px;color:var(--dim);margin-top:3px;">折線圖 · 快照歷史 · 進場建議</div>
+    <div class="detail-fixed" id="dpanel-fixed">
+      <div class="d-empty" style="padding:60px 0;text-align:center;">
+        <div style="font-size:40px;opacity:.1;">📊</div>
+        <div style="font-size:13px;color:#545d68;font-weight:600;margin-top:8px;">點擊左側場次查看詳細分析</div>
+        <div style="font-size:11px;color:#374151;margin-top:3px;">折線圖 · 信號時間軸 · 進場建議</div>
+      </div>
     </div>
+    <div class="detail-scroll" id="dpanel-scroll" style="display:none;"></div>
   </div>
 </div>
 
@@ -1386,71 +1404,73 @@ function renderDetail(g){
       </div>`;
   }
 
-  dp.innerHTML=`
-    <!-- HEADER: 球隊名 + 建議進場 右上角 -->
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+  const dpFixed=document.getElementById('dpanel-fixed');
+  const dpScroll=document.getElementById('dpanel-scroll');
+  if(!dpFixed||!dpScroll) return;
+  dpScroll.style.display='block';
+
+  // ── 固定頂部：球隊名 + 進場按鈕 + 建議下注 + 圖表 ──────────────────────────
+  dpFixed.innerHTML=`
+    <!-- HEADER -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
       <div>
-        <div style="font-size:22px;font-weight:900;color:#cdd9e5;line-height:1.2;">
+        <div style="font-size:20px;font-weight:900;color:#cdd9e5;line-height:1.2;">
           ${away.split(' ').pop()} VS ${home.split(' ').pop()}
         </div>
-        <div style="font-size:12px;color:#768390;margin-top:5px;">
+        <div style="font-size:11px;color:#768390;margin-top:4px;">
           開賽: ${dstr} ${fet(g.commence_time)}
           ${s.d!==0?`<span style="margin-left:8px;font-weight:700;color:${s.col};">${s.lbl} ${s.d>0?'▲+':'▼'}${Math.abs(s.d)}</span>`:''}
           ${s.mlSig!=='FLAT'?`<span style="margin-left:8px;color:#d2a8ff;">🦈 獨贏信號</span>`:''}
         </div>
-        <!-- Steam Score - 重新定義說明 -->
-        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:6px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:5px 12px;">
-            <span style="font-size:10px;color:#545d68;letter-spacing:1px;">蒸汽強度</span>
-            <span style="font-size:22px;font-weight:900;color:${ss.col};font-family:monospace;">${ss.score}</span>
-            <span style="font-size:10px;font-weight:700;color:${ss.col};">/10</span>
-            <span style="font-size:11px;font-weight:700;color:${ss.col};padding:1px 7px;border-radius:3px;background:${ss.col}15;border:1px solid ${ss.col}30;">${ss.label}</span>
+        <!-- Steam Score -->
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:5px;background:#0d1117;border:1px solid #2d3748;border-radius:6px;padding:4px 10px;">
+            <span style="font-size:9px;color:#545d68;letter-spacing:1px;">蒸汽強度</span>
+            <span style="font-size:20px;font-weight:900;color:${ss.col};font-family:monospace;">${ss.score}</span>
+            <span style="font-size:9px;font-weight:700;color:${ss.col};">/10</span>
+            <span style="font-size:10px;font-weight:700;color:${ss.col};padding:1px 6px;border-radius:3px;background:${ss.col}12;border:1px solid ${ss.col}25;">${ss.label}</span>
           </div>
           <div style="font-size:9px;color:#374151;line-height:1.5;">
-            快照品質 ${starRating(g.snapshot_count||0)}<br>
-            <span style="color:#374151;">★ = 快照數 · 非推薦強度</span>
+            ${starRating(g.snapshot_count||0)} 快照 ${g.snapshot_count||0}筆<br>
+            <span style="color:#374151;">★=快照品質，非推薦強度</span>
           </div>
         </div>
-        <!-- 蒸汽強度計分說明 -->
-        <div style="margin-top:6px;font-size:9px;color:#374151;background:#0d1117;border-radius:4px;padding:5px 8px;display:flex;gap:10px;flex-wrap:wrap;">
-          <span>移動幅度: <b style="color:#545d68;">${Math.abs(s.d)>=1.5?'+8':Math.abs(s.d)>=1.0?'+5':Math.abs(s.d)>=0.5?'+3':'+1'}</b></span>
-          <span>ML同步: <b style="color:${s.mlSig!=='FLAT'?'#56d364':'#374151'}">${s.mlSig!=='FLAT'?'+1':'—'}</b></span>
-          <span>快照充足: <b style="color:${(g.snapshot_count||0)>=5?'#56d364':'#374151'}">${(g.snapshot_count||0)>=5?'+0.5':'—'}</b></span>
-          <span>停滯確認: <b style="color:${ss.settled?'#56d364':'#374151'}">${ss.settled?'+0.5':'等待中'}</b></span>
+        <!-- 計分明細 -->
+        <div style="margin-top:5px;font-size:9px;color:#374151;display:flex;gap:8px;flex-wrap:wrap;">
+          <span>移動:<b style="color:#545d68;"> ${Math.abs(s.d)>=1.5?'+8':Math.abs(s.d)>=1.0?'+5':Math.abs(s.d)>=0.5?'+3':'+1'}</b></span>
+          <span>ML同步:<b style="color:${s.mlSig!=='FLAT'?'#56d364':'#374151'}"> ${s.mlSig!=='FLAT'?'+1':'—'}</b></span>
+          <span>快照≥5:<b style="color:${(g.snapshot_count||0)>=5?'#56d364':'#374151'}"> ${(g.snapshot_count||0)>=5?'+0.5':'—'}</b></span>
+          <span>停滯:<b style="color:${ss.settled?'#56d364':'#374151'}"> ${ss.settled?'+0.5':'等待中'}</b></span>
         </div>
       </div>
       <button style="background:${e.rdy?'#da3633':e.lbl==='等待停滯'?'#5a4000':'#21262d'};
         color:${e.rdy?'#fff':e.lbl==='等待停滯'?'#f0b429':'#768390'};
-        border:none;padding:9px 18px;border-radius:6px;font-size:12px;font-weight:800;
-        cursor:${e.rdy?'pointer':'default'};font-family:inherit;white-space:nowrap;
+        border:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:800;
+        cursor:${e.rdy?'pointer':'default'};font-family:inherit;white-space:nowrap;flex-shrink:0;
         ${e.rdy?'animation:pr 1.4s ease-in-out infinite;':''}"
         onclick="${e.rdy?`alert('建議：${e.totalBet?.label||e.mlBet?.label||''}\\n規則：移動停滯後才進場')`:''}"
       >${e.rdy?'🔥 建議進場':e.lbl==='等待停滯'?'⏳ 等待停滯':e.lbl}</button>
     </div>
 
-    <!-- 建議下注區（有信號才顯示，小巧版） -->
+    <!-- 建議下注（有信號才顯示） -->
     ${(e.totalBet||e.mlBet)?`
-    <div style="background:${(e.totalBet||e.mlBet).col}10;border:1px solid ${(e.totalBet||e.mlBet).col}25;
-      border-radius:6px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+    <div style="background:${(e.totalBet||e.mlBet).col}0d;border:1px solid ${(e.totalBet||e.mlBet).col}22;
+      border-radius:6px;padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
       <div>
-        <div style="font-size:15px;font-weight:900;color:${(e.totalBet||e.mlBet).col};">
+        <div style="font-size:14px;font-weight:900;color:${(e.totalBet||e.mlBet).col};">
           ${(e.totalBet||e.mlBet).label}
-          ${e.mlBet&&e.totalBet?`<span style="font-size:12px;color:#d2a8ff;margin-left:8px;">+ 🦈 ${e.mlBet.label}</span>`:''}
+          ${e.mlBet&&e.totalBet?`<span style="font-size:11px;color:#d2a8ff;margin-left:8px;">+ 🦈 ${e.mlBet.label}</span>`:''}
         </div>
-        <div style="font-size:10px;color:#545d68;margin-top:3px;">
-          ${e.rdy?'✓ 移動已停滯':e.lbl==='等待停滯'?'⏳ 仍在移動中，等停滯後進場':''}
+        <div style="font-size:10px;color:#545d68;margin-top:2px;">
+          ${e.rdy?'✓ 移動已停滯':e.lbl==='等待停滯'?'⏳ 仍移動中，等停滯後進場':''}
           ${e.totalBet?.timeNote?` · ${e.totalBet.timeNote}`:''}
         </div>
       </div>
-      <div style="text-align:right;">
-        <div style="font-size:10px;color:#545d68;">${g.snapshot_count||0} 快照 ${starRating(g.snapshot_count||0)}</div>
-      </div>
     </div>`:''}
 
-    <!-- 大折線圖（主角） -->
-    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 16px;margin-bottom:12px;">
-      <!-- 時間軸切換 -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <!-- 折線圖（固定不滾動） -->
+    <div style="background:#1c2333;border:1px solid #2d3748;border-radius:8px;padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <span style="font-size:9px;color:#545d68;letter-spacing:1px;">盤口移動走勢 · PINNACLE</span>
         <div style="display:flex;gap:4px;" id="chart-range-btns">
           <button onclick="setChartRange(1)"  id="cr-1"  class="cr-btn cr-active">近1h</button>
@@ -1458,44 +1478,45 @@ function renderDetail(g){
           <button onclick="setChartRange(99)" id="cr-99" class="cr-btn">全場</button>
         </div>
       </div>
-      <canvas id="lc" style="width:100%!important;height:230px!important;"></canvas>
+      <canvas id="lc" style="width:100%!important;height:200px!important;"></canvas>
     </div>
+  `;
 
-    <!-- 進場理由說明（人話版） -->
-    <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 14px;margin-bottom:12px;">
-      <div style="font-size:9px;color:#545d68;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">📋 信號解讀</div>
+  // ── 滾動底部：信號解讀 + 時間軸 + 數據格 + 快照歷史 ──────────────────────
+  dpScroll.innerHTML=`
+    <!-- 信號解讀 -->
+    <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:11px 13px;margin-bottom:10px;">
+      <div style="font-size:9px;color:#545d68;letter-spacing:2px;text-transform:uppercase;margin-bottom:7px;">📋 信號解讀</div>
       ${reason.reasons.map(r=>`
-        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">
-          <span style="color:#56d364;font-size:11px;flex-shrink:0;margin-top:1px;">✓</span>
+        <div style="display:flex;gap:7px;align-items:flex-start;margin-bottom:4px;">
+          <span style="color:#56d364;font-size:11px;flex-shrink:0;">✓</span>
           <span style="font-size:11px;color:#cdd9e5;line-height:1.5;">${r}</span>
         </div>`).join('')}
       ${reason.warnings.map(w=>`
-        <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">
-          <span style="color:#f0b429;font-size:11px;flex-shrink:0;margin-top:1px;">⚠</span>
+        <div style="display:flex;gap:7px;align-items:flex-start;margin-bottom:4px;">
+          <span style="color:#f0b429;font-size:11px;flex-shrink:0;">⚠</span>
           <span style="font-size:11px;color:#a8956b;line-height:1.5;">${w}</span>
         </div>`).join('')}
     </div>
 
     <!-- 信號時間軸 -->
     ${buildSignalTimeline(snaps)}
-
-    <!-- 關鍵數據（精簡 4格） -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;">
-      <div style="background:#1c2333;border:1px solid #30363d;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">開盤</div>
         <div style="font-size:16px;font-weight:900;color:#768390;font-family:monospace;">${open??'—'}</div>
       </div>
-      <div style="background:#1c2333;border:1px solid #30363d;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">現盤</div>
         <div style="font-size:16px;font-weight:900;color:${s.d>0?'#ffb74d':s.d<0?'#79c0ff':'#cdd9e5'};font-family:monospace;">
           ${cur??'—'}${s.d>0?'▲':s.d<0?'▼':''}
         </div>
       </div>
-      <div style="background:#1c2333;border:1px solid #30363d;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">Over</div>
         <div style="font-size:16px;font-weight:900;color:#ffb74d;font-family:monospace;">${fo(lat.over_juice)}</div>
       </div>
-      <div style="background:#1c2333;border:1px solid #30363d;border-radius:6px;padding:10px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:10px;text-align:center;">
         <div style="font-size:8px;color:#545d68;letter-spacing:1px;margin-bottom:3px;">Under</div>
         <div style="font-size:16px;font-weight:900;color:#79c0ff;font-family:monospace;">${fo(lat.under_juice)}</div>
       </div>
@@ -1503,7 +1524,7 @@ function renderDetail(g){
 
     <!-- ML + 移動（次要數據） -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;">
-      <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">主隊 ML</div>
         <div style="font-size:13px;font-weight:700;font-family:monospace;
           background:${mlD<0?'rgba(121,192,255,.1)':mlD>0?'rgba(255,183,77,.1)':'transparent'};
@@ -1512,11 +1533,11 @@ function renderDetail(g){
           ${fo(lat.ml_home)}${mlD<0?'▼':mlD>0?'▲':''}
         </div>
       </div>
-      <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">客隊 ML</div>
         <div style="font-size:13px;font-weight:700;font-family:monospace;color:#768390;">${fo(lat.ml_away)}</div>
       </div>
-      <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">移動幅度</div>
         <div class="${Math.abs(s.d)>=1.5?'pulse-fast':Math.abs(s.d)>=1.0?'pulse-slow':''}"
           style="font-size:13px;font-weight:900;font-family:monospace;
@@ -1525,7 +1546,7 @@ function renderDetail(g){
         </div>
         ${energyBar(s.d, s.juiceDelta)}
       </div>
-      <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px;text-align:center;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;padding:8px;text-align:center;">
         <div style="font-size:8px;color:#545d68;margin-bottom:2px;">讓分</div>
         <div style="font-size:13px;font-weight:700;font-family:monospace;color:#768390;">${fo(lat.spread_home)}</div>
       </div>
@@ -1537,7 +1558,7 @@ function renderDetail(g){
         <span>▶</span> 快照歷史 · ${snaps.length} 筆（點擊展開）
       </summary>
       ${snaps.length>0?`
-      <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;overflow:hidden;margin-top:6px;">
+      <div style="background:#1c2333;border:1px solid #2d3748;border-radius:6px;overflow:hidden;margin-top:6px;">
         <table style="width:100%;border-collapse:collapse;font-size:10px;">
           <thead><tr style="background:#0d1117;">
             <th style="padding:4px 8px;text-align:left;color:#545d68;font-size:9px;border-bottom:1px solid #21262d;">#</th>
