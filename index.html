@@ -25,6 +25,11 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 .main-today{display:flex;flex:1;overflow:hidden;background:#0d1117;padding:10px;gap:10px;}
 .main-history{display:none;flex:1;overflow:hidden;flex-direction:column;background:#0d1117;padding:10px;}
 
+/* 手機需要明確的 flex 容器高度 */
+@media(max-width:768px){
+  .app{height:100dvh;} /* 用 dvh 避免手機地址欄影響 */
+}
+
 /* SIDEBAR（第二層：中深，左側圓角） */
 /* ── 三層顏色系統 ──
    Layer 1（最深）：#0d1117  大背景
@@ -69,21 +74,32 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 
 /* MOBILE */
 @media(max-width:768px){
-  .main-today{flex-direction:column;padding:8px;gap:8px;}
-  .sidebar{width:100%;border-radius:10px;max-height:45vh;}
-  .detail-panel{border-radius:10px;}
+  /* 手機：上下排列，各佔一半 */
+  .main-today{flex-direction:column;padding:6px;gap:6px;}
+
+  /* 未選場次：側欄佔滿 */
+  .sidebar{width:100%;border-radius:10px;flex:1;min-height:0;}
+  .detail-panel{display:none;border-radius:10px;}
+
+  /* 選了場次：側欄隱藏，詳細頁佔滿 */
+  .main-today.detail-open .sidebar{display:none;}
+  .main-today.detail-open .detail-panel{display:flex;flex:1;min-height:0;}
+
   .detail-fixed{padding:12px 12px 8px;}
   .detail-scroll{padding:8px 12px 12px;}
   .topbar-meta{display:none;}
-  .stat-box{gap:6px;padding:5px 8px;}
-  .stat .stv{font-size:15px;}
-  .stat .stl{font-size:7px;}
+  .stat-box{gap:4px;}
+  .stat{padding:4px 8px!important;}
+  .stat .stv{font-size:14px!important;}
+  .stat .stl{font-size:7px!important;}
   .btn-txt{display:none;}
-  .main-today.detail-open .sidebar{display:none;}
-  .main-today.detail-open .detail-panel{display:flex;}
   .mobile-back{display:flex!important;}
+
+  /* 手機 topbar 壓縮 */
+  .topbar{padding:7px 10px;}
+  .logo{font-size:16px;}
 }
-.mobile-back{display:none;align-items:center;gap:6px;padding:8px 14px;background:#161b22;border-radius:8px;margin:4px 8px;font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;flex-shrink:0;}
+.mobile-back{display:none;align-items:center;gap:6px;padding:12px 14px;background:#162032;border-bottom:1px solid #1e2d42;font-size:13px;font-weight:700;color:#58a6ff;cursor:pointer;flex-shrink:0;min-height:44px;}
 
 /* ── TOP BAR ── */
 .topbar-inner{display:flex;justify-content:space-between;align-items:center;}
@@ -381,7 +397,7 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
   <!-- SIDEBAR -->
   <div class="sidebar">
     <!-- ── 績效儀表板（信任感建立）── -->
-    <div id="perf-dash" style="padding:10px 12px;border-bottom:1px solid #21262d;background:#0f1924;display:none;">
+    <div id="perf-dash" style="padding:8px 12px;border-bottom:1px solid #1e2d42;background:#0f1924;display:none;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <span style="font-size:9px;color:#545d68;letter-spacing:1px;font-weight:700;">📊 歷史績效（蒸汽信號）</span>
         <span style="font-size:9px;color:#374151;" id="perf-period">近30天</span>
