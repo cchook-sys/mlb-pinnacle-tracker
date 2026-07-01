@@ -611,7 +611,9 @@ function drawChart(snaps, hours){
 
   chartObj=new Chart(cv,{
     data:{labels,datasets:[
-      {type:'line',label:'大小分 (O/U)',data:filtered.map(s2=>s2.total),
+      {type:'line',label:'大小分 (O/U)',
+       // 四捨五入到小數點後1位，避免浮點數精度問題
+       data:filtered.map(s2=>s2.total!=null?Math.round(s2.total*10)/10:null),
        borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.07)',
        borderWidth:2.5,pointRadius:filtered.length>20?2:4,pointHoverRadius:7,
        pointBackgroundColor:'#38bdf8',pointHoverBackgroundColor:'#fff',
@@ -666,26 +668,36 @@ function drawChart(snaps, hours){
         x:{ticks:{color:'#374151',font:{size:9},maxTicksLimit:10},grid:{color:'rgba(45,55,72,.3)'}},
         y:{
           position:'left',
-          ticks:{color:'#38bdf8',font:{size:10},callback:v=>`${v}`},
+          ticks:{
+            color:'#38bdf8',font:{size:10},
+            callback:v=>{
+              // 修正浮點數精度問題，只顯示到小數點後1位
+              const n=Math.round(v*10)/10;
+              return Number.isInteger(n)?n.toFixed(1):n.toFixed(1);
+            }
+          },
           grid:{color:'rgba(56,189,248,.08)'},
           title:{display:true,text:'大小分',color:'#38bdf8',font:{size:9}},
           afterDataLimits(scale){
-            // 大小分軸：只顯示合理起伏，padding ±0.5
             const r=scale.max-scale.min;
             const pad=Math.max(r*0.15,0.3);
-            scale.min-=pad; scale.max+=pad;
+            scale.min=Math.round((scale.min-pad)*10)/10;
+            scale.max=Math.round((scale.max+pad)*10)/10;
           }
         },
         y2:{
           position:'right',
-          ticks:{color:'#fbbf24',font:{size:10},callback:v=>v>0?`+${v}`:v},
+          ticks:{
+            color:'#fbbf24',font:{size:10},
+            callback:v=>Number.isInteger(v)?(v>0?`+${v}`:v):(Math.round(v)>0?`+${Math.round(v)}`:Math.round(v))
+          },
           grid:{drawOnChartArea:false},
           title:{display:true,text:'主獨贏',color:'#fbbf24',font:{size:9}},
           afterDataLimits(scale){
-            // ML軸：獨立範圍，不影響大小分顯示
             const r=scale.max-scale.min;
             const pad=Math.max(r*0.15,5);
-            scale.min-=pad; scale.max+=pad;
+            scale.min=Math.round(scale.min-pad);
+            scale.max=Math.round(scale.max+pad);
           }
         }
       }
@@ -1278,34 +1290,54 @@ function renderList(){
     const hotClass=isHot?'gc-hot':'';
     const hotBadge=isHot?'<span class="gc-hot-badge">🔴HOT</span>':'';
     const compactClass=compactMode?'compact':'';
+    const ss=steamScore(s,snaps,mins);
+
+    // 卡片背景光暈（依狀態）
+    let cardBg='transparent';
+    let cardGlow='';
+    if(e.rdy){
+      cardBg='rgba(57,255,20,.04)';
+      cardGlow='box-shadow:inset 0 0 0 1px rgba(57,255,20,.15);';
+    } else if(e.lbl==='等待停滯'){
+      cardBg='rgba(240,180,41,.03)';
+    }
+
+    // 蒸汽強度進度條（卡片用）
+    const ssPct=Math.min(ss.score/10*100,100);
+    const ssBar=ss.score>=2?`
+      <div style="height:2px;background:#0d1117;border-radius:1px;margin:3px 0;overflow:hidden;">
+        <div style="height:100%;width:${ssPct}%;background:${ss.col};border-radius:1px;transition:width .5s;
+          ${ss.score>=6?'box-shadow:0 0 4px '+ss.col+'60;':''}"></div>
+      </div>`:'';
 
     return `<div onclick="selGame('${g.game_id}')" class="${hotClass} ${compactClass}"
-      style="padding:${compactMode?'6px':'10px'} 12px;border-bottom:1px solid #21262d;cursor:pointer;border-left:3px solid ${borderCol};transition:background .1s;${isActive?'background:#1c2333;':''}"
-      onmouseenter="if('${selId}'!=='${g.game_id}')this.style.background='rgba(255,255,255,.025)'"
-      onmouseleave="if('${selId}'!=='${g.game_id}')this.style.background='transparent'">
+      style="padding:${compactMode?'6px':'10px'} 12px;border-bottom:1px solid #1e2d42;cursor:pointer;
+        border-left:3px solid ${borderCol};transition:background .15s;
+        background:${isActive?'#1c2333':cardBg};${cardGlow}"
+      onmouseenter="if('${selId}'!=='${g.game_id}')this.style.background='rgba(255,255,255,.03)'"
+      onmouseleave="if('${selId}'!=='${g.game_id}')this.style.background='${cardBg||'transparent'}'">
       ${compactMode?'':`
       <!-- Row 1: date + momentum + stars -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
         <span style="font-size:9px;color:#374151;font-family:monospace;">${dstr} ${fet(g.commence_time)}</span>
         <div style="display:flex;align-items:center;gap:5px;">${mdot} ${starRating(sn)}</div>
       </div>
-      <!-- Snap progress bar -->
-      <div style="height:2px;background:#0d1117;border-radius:1px;margin-bottom:3px;overflow:hidden;">
-        <div style="height:100%;width:${snapPct}%;background:${snapCol};border-radius:1px;transition:width .4s;"></div>
-      </div>
+      <!-- 蒸汽強度進度條 -->
+      ${ssBar}
       <!-- Time to game -->
       <div style="font-size:9px;font-weight:700;color:${ttg.col};margin-bottom:4px;">${ttg.txt}</div>`}
       <!-- Team names + badges -->
       <div style="font-size:${compactMode?'11':'12'}px;font-weight:800;display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:${compactMode?'2':'4'}px;">
-        <span style="color:#6e7d94;">${away.split(' ').pop()}</span>
-        <span style="color:#21262d;">VS</span>
+        <span style="color:#768390;">${away.split(' ').pop()}</span>
+        <span style="color:#2d3748;">VS</span>
         ${home.split(' ').pop()}
         ${hotBadge}
-        ${(()=>{
-          const ss=steamScore(s,snaps,mins);
-          if(ss.score<4) return '';
-          return `<span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:3px;background:${ss.col}12;color:${ss.col};border:1px solid ${ss.col}25;">${ss.score}/10</span>`;
-        })()}
+        ${ss.score>=4?`<span
+          title="蒸汽強度 ${ss.score}/10：移動幅度+ML同步+快照數+開賽時間的綜合評分&#10;≥8極強 · ≥6強 · ≥4中等"
+          style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:3px;
+            background:${ss.col}15;color:${ss.col};border:1px solid ${ss.col}30;cursor:help;">
+          ${ss.score}/10
+        </span>`:''}
         ${s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(57,255,20,.12);color:#39ff14;border:1px solid rgba(57,255,20,.25);">⚡推薦</span>':''}
         ${s.st&&!s.rec?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(255,183,77,.1);color:#ffb74d;border:1px solid rgba(255,183,77,.25);">🔥蒸汽</span>':''}
         ${s.mlSig!=='FLAT'?'<span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(210,168,255,.1);color:#d2a8ff;border:1px solid rgba(210,168,255,.25);">🦈獨贏</span>':''}
@@ -1321,7 +1353,8 @@ function renderList(){
         </div>
         <div style="display:flex;align-items:center;gap:5px;">
           <button class="copy-btn" onclick="event.stopPropagation();copyGameData(games.find(g=>g.game_id==='${g.game_id}'),this)">複製</button>
-          <div style="font-size:11px;font-weight:700;color:${stateLabel.col};text-align:right;white-space:nowrap;">${stateLabel.txt}</div>
+          <div style="font-size:11px;font-weight:700;color:${stateLabel.col};text-align:right;white-space:nowrap;
+            ${e.rdy?'animation:pg 1.4s ease-in-out infinite;':''}">${stateLabel.txt}</div>
         </div>
       </div>
       ${!compactMode&&betHtml?`<div style="margin-top:4px;">${betHtml}</div>`:''}
