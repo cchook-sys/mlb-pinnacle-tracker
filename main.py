@@ -130,7 +130,14 @@ def signal_from_snaps(snaps: list) -> dict:
 def pick_from_signal(sig, game):
     d     = sig.get("delta", 0)
     grade = sig.get("grade", "FLAT")
-    total = (game.get("latest") or {}).get("total")
+    # 從 latest 或 snapshots 最後一筆取當前盤口
+    total = None
+    if game.get("latest"):
+        total = game["latest"].get("total")
+    elif game.get("snapshots"):
+        snaps = game["snapshots"]
+        if snaps:
+            total = snaps[-1].get("total")
     if grade not in ("RECOMMEND", "STEAM"):
         return None
     if d >= THRESHOLD_STEAM:   return f"OVER {total}"
@@ -707,7 +714,8 @@ async def get_summary():
 
     for d in docs:
         snaps = d.get("snapshots", [])
-        if len(snaps) < 3:
+        # 快照門檻降低：≥2 筆就進入評估（睡前總結時間快照應已夠）
+        if len(snaps) < 2:
             continue
 
         sig   = signal_from_snaps(snaps)
@@ -821,7 +829,7 @@ async def get_summary():
                                    __import__('datetime').timedelta(hours=8)
                                )
                            ).strftime("%Y-%m-%d %H:%M 台灣"),
-        "taiwan_ready":    taiwan_ready,   # 台灣 22:35 後才算準確
+        "taiwan_ready":    taiwan_ready,
         "total_games":     len(docs),
         "recommendations": recommendations[:5],
         "watch_list":      watch_list[:5],
@@ -835,6 +843,9 @@ async def get_summary():
         },
     }
 
+
+@app.get("/model")
+async def get_model():
     """模型準確度看板（預計算版本，速度快）"""
     docs = await get_db()["model_stats"].find({}).sort("period_days",1).to_list(10)
     return [{"period_days": d["period_days"], "win_rate": d.get("win_rate",0),
