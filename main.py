@@ -485,15 +485,25 @@ async def get_games():
     return result
 
 @app.get("/history")
+@app.get("/history")
 async def get_history():
-    yesterday = et_date_str(utc_now() - timedelta(days=1))
-    docs      = await get_db()["history"].find({"date": yesterday}).sort("commence_time",1).to_list(30)
-    result    = []
-    for d in docs:
+    ts        = utc_now()
+    yesterday = et_date_str(ts - timedelta(days=1))
+    two_days  = et_date_str(ts - timedelta(days=2))
+
+    # 先從 history collection 撈（已結算）
+    hist_docs = await get_db()["history"].find(
+        {"date": {"$in": [yesterday, two_days]}}
+    ).sort("commence_time", 1).to_list(50)
+
+    result = []
+    seen_ids = set()
+
+    for d in hist_docs:
         delta = d.get("total_delta", 0)
         pick  = d.get("pick")
-        # 只顯示蒸汽以上（≥1.0）且有推算方向的場次
         if abs(delta) >= THRESHOLD_STEAM and pick:
+            seen_ids.add(d["game_id"])
             result.append({
                 "game_id":       d["game_id"],
                 "home":          d["home"],
@@ -512,6 +522,44 @@ async def get_history():
                 "recommended":   abs(delta) >= THRESHOLD_RECOMMEND,
                 "grade":         "⚡ 推薦" if abs(delta) >= THRESHOLD_RECOMMEND else "🔥 蒸汽",
             })
+
+    # 備用：從 snapshots 撈昨天有信號但可能沒進 history 的場次
+    snap_docs = await get_db()["snapshots"].find(
+        {"date": {"$in": [yesterday, two_days]}}
+    ).sort("commence_time", 1).to_list(50)
+
+    for d in snap_docs:
+        if d["game_id"] in seen_ids:
+            continue  # 已在 history 裡，跳過
+        snaps = d.get("snapshots", [])
+        if len(snaps) < 2:
+            continue
+        sig   = signal_from_snaps(snaps)
+        delta = sig.get("delta", 0)
+        pick  = pick_from_signal(sig, d)
+        if abs(delta) >= THRESHOLD_STEAM and pick:
+            result.append({
+                "game_id":       d["game_id"],
+                "home":          d["home"],
+                "away":          d["away"],
+                "commence_time": d["commence_time"],
+                "date":          d.get("date", yesterday),
+                "open_total":    (snaps[0].get("total") if snaps else None),
+                "close_total":   (snaps[-1].get("total") if snaps else None),
+                "total_delta":   delta,
+                "ml_delta":      sig.get("ml_delta", 0),
+                "pick":          pick,
+                "actual_total":  d.get("actual_total"),
+                "result":        d.get("result"),
+                "signal":        sig,
+                "sharp":         sig.get("sharp", False),
+                "recommended":   abs(delta) >= THRESHOLD_RECOMMEND,
+                "grade":         "⚡ 推薦" if abs(delta) >= THRESHOLD_RECOMMEND else "🔥 蒸汽",
+                "from_snapshots": True,  # 標記來源
+            })
+
+    # 按開賽時間排序
+    result.sort(key=lambda x: x["commence_time"])
     return result
 
 @app.get("/corrections")
