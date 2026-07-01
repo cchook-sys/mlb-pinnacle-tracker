@@ -1894,7 +1894,7 @@ async function fetchHist(){
 
 function renderHist(data){
   const tb=document.getElementById('htb');
-  if(!data.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">昨日尚無蒸汽信號記錄（移動 ≥ 0.5）</td></tr>';return;}
+  if(!data.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">昨日（含前天）尚無蒸汽信號記錄（移動 ≥ 1.0）<br><span style="font-size:10px;color:#374151;">若有場次但未顯示，可能是結算程式尚未抓到賽果</span></td></tr>';return;}
   let w=0,l=0,p=0,rw=0,rl=0;
   tb.innerHTML=data.map(g=>{
     const d=g.total_delta||0;
@@ -1914,6 +1914,7 @@ function renderHist(data){
         <div style="font-weight:700;font-size:12px">${(g.away||'').split(' ').pop()} @ ${(g.home||'').split(' ').pop()}</div>
         <div style="font-size:10px;color:var(--dim);margin-top:1px">${fet(g.commence_time)}</div>
         <span class="grade-badge ${isRec?'gb-rec':'gb-steam'}">${grade}</span>
+        ${g.from_snapshots?'<span style="font-size:8px;color:#374151;margin-left:4px;">快照備援</span>':''}
       </td>
       <td style="font-family:monospace;color:#6e7d94">${g.open_total??'—'}</td>
       <td style="font-family:monospace;font-weight:800;font-size:13px">${g.close_total??'—'}</td>
