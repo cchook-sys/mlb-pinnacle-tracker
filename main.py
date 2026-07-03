@@ -229,7 +229,9 @@ async def fetch_and_store_odds(force: bool = False) -> dict:
 async def fetch_and_settle():
     if not ODDS_API_KEY: return
     try:
-        url = f"{ODDS_BASE}/scores/?apiKey={ODDS_API_KEY}&daysFrom=1&dateFormat=iso"
+        # daysFrom=2：涵蓋過去 48 小時開賽的比賽
+        # 修復：daysFrom=1 會漏掉開賽超過 24h 的下午場（隔天中午就超過24h，永遠結算不到）
+        url = f"{ODDS_BASE}/scores/?apiKey={ODDS_API_KEY}&daysFrom=2&dateFormat=iso"
         async with httpx.AsyncClient(timeout=25) as c:
             r = await c.get(url)
         if r.status_code != 200: return
