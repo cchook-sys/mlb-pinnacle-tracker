@@ -858,6 +858,77 @@ async def get_model():
             } for d in docs]
 
 
+@app.get("/calibration")
+async def get_calibration():
+    """
+    邏輯校正分析：把歷史結算按條件分桶，找出哪些條件勝率最高
+    用於每週調整篩選邏輯
+    """
+    ts       = utc_now()
+    cutoff   = et_date_str(ts - timedelta(days=30))
+    docs     = await get_db()["history"].find(
+        {"date": {"$gte": cutoff}, "result": {"$in": ["WIN","LOSS"]}}
+    ).to_list(500)
+
+    def bucket_stats(items):
+        w = sum(1 for d in items if d.get("result")=="WIN")
+        l = sum(1 for d in items if d.get("result")=="LOSS")
+        t = w + l
+        return {"wins": w, "losses": l, "total": t,
+                "win_rate": round(w/t*100,1) if t>0 else None,
+                "roi": round((w*0.909-l)/t*100,1) if t>0 else None}
+
+    # ── 分桶1：移動幅度 ──
+    by_delta = {
+        "1.0-1.4 蒸汽":   bucket_stats([d for d in docs if 1.0<=abs(d.get("total_delta",0))<1.5]),
+        "1.5-1.9 推薦":   bucket_stats([d for d in docs if 1.5<=abs(d.get("total_delta",0))<2.0]),
+        "2.0-2.9 強推薦": bucket_stats([d for d in docs if 2.0<=abs(d.get("total_delta",0))<3.0]),
+        "3.0+ 極強":     bucket_stats([d for d in docs if abs(d.get("total_delta",0))>=3.0]),
+    }
+
+    # ── 分桶2：銳錢 vs 公眾錢 ──
+    by_money = {
+        "銳錢(ML同步)":  bucket_stats([d for d in docs if d.get("sharp")]),
+        "公眾錢(ML未同步)": bucket_stats([d for d in docs if not d.get("sharp")]),
+    }
+
+    # ── 分桶3：大分 vs 小分方向 ──
+    by_direction = {
+        "OVER 大分":  bucket_stats([d for d in docs if d.get("pick","").startswith("OVER")]),
+        "UNDER 小分": bucket_stats([d for d in docs if d.get("pick","").startswith("UNDER")]),
+    }
+
+    # ── 分桶4：移動方向 × 結果的交叉 ──
+    by_cross = {
+        "大分推薦+銳錢":  bucket_stats([d for d in docs if d.get("pick","").startswith("OVER") and d.get("sharp")]),
+        "大分推薦+公眾":  bucket_stats([d for d in docs if d.get("pick","").startswith("OVER") and not d.get("sharp")]),
+        "小分推薦+銳錢":  bucket_stats([d for d in docs if d.get("pick","").startswith("UNDER") and d.get("sharp")]),
+        "小分推薦+公眾":  bucket_stats([d for d in docs if d.get("pick","").startswith("UNDER") and not d.get("sharp")]),
+    }
+
+    # ── 自動建議 ──
+    suggestions = []
+    for name, stats in {**by_delta, **by_money, **by_direction, **by_cross}.items():
+        if stats["total"] and stats["total"] >= 5:
+            if stats["win_rate"] is not None and stats["win_rate"] < 45:
+                suggestions.append(f"⚠ 「{name}」勝率僅 {stats['win_rate']}%（{stats['total']}場），建議降級或過濾此類信號")
+            elif stats["win_rate"] is not None and stats["win_rate"] >= 65:
+                suggestions.append(f"✅ 「{name}」勝率 {stats['win_rate']}%（{stats['total']}場），可提高此類信號權重")
+    if not suggestions:
+        suggestions.append("樣本尚不足以做出調整建議（各桶需 ≥5 場），繼續累積數據")
+
+    return {
+        "period":       "近30天",
+        "sample_size":  len(docs),
+        "by_delta":     by_delta,
+        "by_money":     by_money,
+        "by_direction": by_direction,
+        "by_cross":     by_cross,
+        "suggestions":  suggestions,
+        "generated_at": ts.isoformat(),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
