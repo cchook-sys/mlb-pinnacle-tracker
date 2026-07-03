@@ -130,7 +130,7 @@ def signal_from_snaps(snaps: list) -> dict:
 def pick_from_signal(sig, game):
     d     = sig.get("delta", 0)
     grade = sig.get("grade", "FLAT")
-    # 從 latest 或 snapshots 最後一筆取當前盤口
+    sharp = sig.get("sharp", False)
     total = None
     if game.get("latest"):
         total = game["latest"].get("total")
@@ -139,6 +139,9 @@ def pick_from_signal(sig, game):
         if snaps:
             total = snaps[-1].get("total")
     if grade not in ("RECOMMEND", "STEAM"):
+        return None
+    # ── 校正（2026-07 數據）：蒸汽級(1.0-1.4)公眾錢勝率僅50%，必須ML同步才給建議
+    if grade == "STEAM" and not sharp:
         return None
     if d >= THRESHOLD_STEAM:   return f"OVER {total}"
     if d <= -THRESHOLD_STEAM:  return f"UNDER {total}"
@@ -735,12 +738,14 @@ async def get_summary():
         if mins_to_game < 20:
             continue
 
-        # 蒸汽強度計算
+        # ── 蒸汽強度計算（2026-07 校正版）──────────────────────────
+        # 校正依據近30天數據：3.0+ 勝率81% · 銳錢75% vs 公眾25% · OVER 89% vs UNDER 61%
         a = abs(td)
         base = 0
-        if a >= 2.0:      base = 8
+        if a >= 3.0:      base = 9   # 極強（81.2% 勝率實證）
+        elif a >= 2.0:    base = 8
         elif a >= 1.5:    base = 7
-        elif a >= 1.0:    base = 5
+        elif a >= 1.0:    base = 4   # 蒸汽級降為4（50% 勝率，需靠加分才能進推薦）
         elif a >= 0.5:    base = 3
         else:
             jd = abs(sig.get("juice_delta", 0))
@@ -748,7 +753,8 @@ async def get_summary():
             else:        base = 1
 
         bonus = 0
-        if ml_sig != "FLAT":              bonus += 1
+        if ml_sig != "FLAT":              bonus += 1.5  # 銳錢確認（75% vs 25%，加分提高）
+        if td > 0:                        bonus += 0.5  # OVER 方向（88.9% 勝率實證）
         if len(snaps) >= 5:               bonus += 0.5
         if 120 <= mins_to_game <= 480:    bonus += 0.5
         if grade == "RECOMMEND" and ml_sig != "FLAT": bonus += 1
@@ -767,11 +773,13 @@ async def get_summary():
 
         steam_score = min(round(base + bonus, 1), 10)
 
-        # ── 邊緣蒸汽修正（根據昨日資料）────────────────────────────
-        # 移動 1.0–1.1 且無 ML 同步 → 公眾資金為主，降為觀察
-        edge_steam = (1.0 <= a <= 1.1) and ml_sig == "FLAT"
+        # ── 公眾錢過濾（校正核心：公眾錢勝率僅25%）─────────────────
+        # 所有蒸汽級信號（1.0-1.4）無 ML 同步 → 降為觀察
+        edge_steam = (grade == "STEAM") and ml_sig == "FLAT"
+        # 小分+公眾錢 = 最弱組合（25% 勝率），推薦級也要警告
+        weak_combo = (td < 0) and ml_sig == "FLAT"
         if edge_steam:
-            steam_score = max(steam_score - 1.5, 2.0)  # 降分，不進推薦
+            steam_score = max(steam_score - 2.0, 2.0)
 
         # 推薦方向
         pick = pick_from_signal(sig, d)
@@ -779,7 +787,9 @@ async def get_summary():
         # 加入警告標記
         warnings = []
         if edge_steam:
-            warnings.append("邊緣蒸汽且ML未同步，公眾資金可能性高，謹慎進場")
+            warnings.append("蒸汽級但ML未同步（公眾錢勝率僅25%），已降為觀察")
+        elif weak_combo and pick:
+            warnings.append("小分+ML未同步為歷史最弱組合（25%勝率），建議略過或減注")
         if not settled and steam_score >= 5:
             warnings.append("盤口仍在移動，建議等停滯後再確認")
         if mins_to_game > 720:
