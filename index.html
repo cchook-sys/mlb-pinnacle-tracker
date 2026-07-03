@@ -456,9 +456,12 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
   <div class="detail-panel" id="dpanel">
     <div class="detail-fixed" id="dpanel-fixed">
       <div class="d-empty" style="padding:60px 0;text-align:center;">
-        <div style="font-size:40px;opacity:.1;">📊</div>
-        <div style="font-size:13px;color:#545d68;font-weight:600;margin-top:8px;">點擊左側場次查看詳細分析</div>
-        <div style="font-size:11px;color:#374151;margin-top:3px;">折線圖 · 信號時間軸 · 進場建議</div>
+        <div style="font-size:40px;opacity:.12;">📊</div>
+        <div style="font-size:14px;color:#768390;font-weight:700;margin-top:10px;">選擇一場賽事，查看盤口波動與蒸汽數據</div>
+        <div style="font-size:11px;color:#545d68;margin-top:6px;line-height:1.7;">
+          ← 左側有 <span style="color:#ffb74d;">🔥 進度條</span> 的場次代表資金正在流動<br>
+          <span style="color:#39ff14;">綠色邊框</span> = 可進場 · <span style="color:#f0b429;">黃色</span> = 等待停滯 · 暗色 = 冷卻中
+        </div>
       </div>
     </div>
     <div class="detail-scroll" id="dpanel-scroll" style="display:none;"></div>
@@ -1353,7 +1356,8 @@ function renderList(){
         </div>
         <div style="display:flex;align-items:center;gap:5px;">
           <button class="copy-btn" onclick="event.stopPropagation();copyGameData(games.find(g=>g.game_id==='${g.game_id}'),this)">複製</button>
-          <div style="font-size:11px;font-weight:700;color:${stateLabel.col};text-align:right;white-space:nowrap;
+          <div style="font-size:10px;font-weight:700;color:${stateLabel.col};white-space:nowrap;
+            padding:3px 9px;border-radius:12px;background:${stateLabel.col}12;border:1px solid ${stateLabel.col}28;
             ${e.rdy?'animation:pg 1.4s ease-in-out infinite;':''}">${stateLabel.txt}</div>
         </div>
       </div>
@@ -1986,24 +1990,27 @@ function renderHist(data){
 
 // ── STATS ─────────────────────────────────────────────────────────────────────
 // ── 績效儀表板 ────────────────────────────────────────────────────────────────
+let statsCache=null;
+let perfExpanded=false;
+
 function renderPerfDash(s){
+  statsCache=s;
   const dash=document.getElementById('perf-dash');
   const grid=document.getElementById('perf-grid');
   if(!dash||!grid) return;
 
   const d30=s['30d']||{};
-  const d7=s['7d']||{};
   const wins=d30.wins||0;
   const losses=d30.losses||0;
-  const pushes=d30.pushes||0;
   const wr=d30.win_rate||0;
   const roi=d30.roi||0;
   const recWr=d30.rec_wr||0;
-  const sharpWr=d30.sharp_wr||0;
   const total=d30.total||0;
 
   if(total===0){dash.style.display='none';return;}
   dash.style.display='block';
+  dash.style.cursor='pointer';
+  dash.onclick=togglePerfDetail;
 
   const wrCol=wr>=58?'#39ff14':wr>=50?'#f0b429':'#ff7b72';
   const roiCol=roi>=0?'#56d364':'#ff7b72';
@@ -2014,16 +2021,64 @@ function renderPerfDash(s){
     {l:'ROI',v:`${roi>=0?'+':''}${roi}%`,c:roiCol,s:'16px'},
     {l:'推薦勝率',v:`${recWr}%`,c:recWr>=58?'#39ff14':recWr>=50?'#f0b429':'#ff7b72',s:'16px'},
   ].map(item=>`
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:5px;padding:6px 5px;text-align:center;">
+    <div style="background:#1a2332;border:1px solid #1e2d42;border-radius:5px;padding:6px 5px;text-align:center;">
       <div style="font-size:8px;color:#374151;margin-bottom:2px;white-space:nowrap;">${item.l}</div>
       <div style="font-size:${item.s};font-weight:900;color:${item.c};font-family:monospace;line-height:1.2;">${item.v}</div>
     </div>`).join('');
 
-  // 更新頂部統計欄
+  // 展開的詳細表格
+  renderPerfDetail();
+
   const sw=document.getElementById('sw');
   if(sw&&total>0){
     sw.innerHTML=`<span style="font-size:17px;">${wr}%</span><span style="font-size:9px;color:#545d68;display:block;line-height:1;">${total}場</span>`;
   }
+}
+
+function togglePerfDetail(){
+  perfExpanded=!perfExpanded;
+  renderPerfDetail();
+}
+
+function renderPerfDetail(){
+  let detail=document.getElementById('perf-detail');
+  if(!detail){
+    const dash=document.getElementById('perf-dash');
+    if(!dash) return;
+    detail=document.createElement('div');
+    detail.id='perf-detail';
+    dash.appendChild(detail);
+  }
+  if(!perfExpanded||!statsCache){detail.innerHTML='';return;}
+
+  const rows=[
+    {label:'近7天',  d:statsCache['7d']||{}},
+    {label:'近30天', d:statsCache['30d']||{}},
+    {label:'全季',   d:statsCache['all']||{}},
+  ];
+  detail.innerHTML=`
+    <div style="margin-top:8px;border-top:1px solid #1e2d42;padding-top:8px;" onclick="event.stopPropagation();">
+      <table style="width:100%;border-collapse:collapse;font-size:10px;">
+        <thead><tr>
+          <th style="text-align:left;color:#374151;padding:3px 4px;font-weight:600;">期間</th>
+          <th style="color:#374151;padding:3px 4px;font-weight:600;">戰績</th>
+          <th style="color:#374151;padding:3px 4px;font-weight:600;">勝率</th>
+          <th style="color:#374151;padding:3px 4px;font-weight:600;">ROI</th>
+          <th style="color:#374151;padding:3px 4px;font-weight:600;">銳錢WR</th>
+        </tr></thead>
+        <tbody>${rows.map(r=>{
+          const wr=r.d.win_rate||0, roi=r.d.roi||0;
+          return `<tr style="border-top:1px solid #1a2332;">
+            <td style="padding:4px;color:#768390;font-weight:700;">${r.label}</td>
+            <td style="padding:4px;text-align:center;color:#cdd9e5;font-family:monospace;">${r.d.wins||0}W ${r.d.losses||0}L</td>
+            <td style="padding:4px;text-align:center;font-weight:800;font-family:monospace;color:${wr>=58?'#39ff14':wr>=50?'#f0b429':'#ff7b72'};">${wr}%</td>
+            <td style="padding:4px;text-align:center;font-weight:800;font-family:monospace;color:${roi>=0?'#56d364':'#ff7b72'};">${roi>=0?'+':''}${roi}%</td>
+            <td style="padding:4px;text-align:center;color:#d2a8ff;font-family:monospace;">${r.d.sharp_wr||0}%</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+      <div style="font-size:8px;color:#374151;margin-top:5px;text-align:center;">點擊儀表板收合 · 銳錢WR = ML同步移動場次的勝率</div>
+    </div>`;
 }
 
 async function fetchStats(){
