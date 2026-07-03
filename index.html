@@ -1777,10 +1777,19 @@ function renderSummary(data){
 
   // 推薦場次
   if(recs.length===0){
+    // 判斷是否所有比賽已開賽（台灣早上看 = ET 晚上，比賽都開打了）
+    const etHour=data.et_time?parseInt((data.et_time.match(/(\d{2}):\d{2} ET/)||[])[1]||'0'):0;
+    const allStarted=etHour>=17||etHour<8; // ET 17:00 後或凌晨 = 比賽多已開打
     html+=`<div style="text-align:center;padding:30px;background:#0d1117;border-radius:8px;border:1px dashed #21262d;margin-bottom:14px;">
-      <div style="font-size:20px;margin-bottom:6px;">😴</div>
-      <div style="font-size:13px;color:#545d68;font-weight:600;">今日尚無推薦場次</div>
-      <div style="font-size:11px;color:#374151;margin-top:4px;">蒸汽強度 ≥ 5 且有明確方向才會列入<br>稍後再試，或等快照累積更多</div>
+      <div style="font-size:20px;margin-bottom:6px;">${allStarted?'⚾':'😴'}</div>
+      <div style="font-size:13px;color:#545d68;font-weight:600;">
+        ${allStarted?'今日場次已全數開賽':'今日尚無推薦場次'}
+      </div>
+      <div style="font-size:11px;color:#374151;margin-top:4px;">
+        ${allStarted
+          ?'睡前總結適用時間：台灣 22:35–23:30（下午場開賽前）<br>明天台灣 22:35 再來查看新的推薦'
+          :'蒸汽強度 ≥ 5 且有明確方向才會列入<br>稍後再試，或等快照累積更多'}
+      </div>
     </div>`;
   } else {
     html+=`<div style="font-size:9px;color:#39ff14;letter-spacing:2px;font-weight:700;margin-bottom:8px;">⚡ 今日推薦（${recs.length}場）</div>`;
