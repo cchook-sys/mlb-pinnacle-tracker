@@ -1894,6 +1894,27 @@ function renderSummary(data){
     });
   }
 
+  // 系統運作確認：無達標場次時顯示最接近的前3場
+  const nears=data.near_misses||[];
+  if(recs.length===0&&watches.length===0&&nears.length>0){
+    html+=`<div style="font-size:9px;color:#545d68;letter-spacing:2px;font-weight:700;margin:14px 0 8px;">📡 今日最接近門檻的場次（系統運作中，僅供參考）</div>`;
+    nears.forEach(g=>{
+      const home=(g.home||'').split(' ').pop();
+      const away=(g.away||'').split(' ').pop();
+      html+=`<div style="background:#0d1117;border:1px solid #1a2332;border-radius:6px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;opacity:.7;">
+        <div>
+          <span style="font-size:11px;font-weight:700;color:#768390;">${away} VS ${home}</span>
+          <span style="font-size:9px;color:#374151;margin-left:8px;">${fet(g.commence_time)} ET</span>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:10px;font-weight:700;color:#545d68;">${g.steam_score}/10</span>
+          <span style="font-size:9px;color:#374151;margin-left:6px;">移動 ${g.delta>0?'+':''}${g.delta}${g.ml_signal==='FLAT'?' · ML未同步':''}</span>
+        </div>
+      </div>`;
+    });
+    html+=`<div style="font-size:9px;color:#374151;margin-top:4px;text-align:center;">以上場次未達推薦門檻（強度≥5 + 銳錢確認），系統寧缺勿濫</div>`;
+  }
+
   // 注意事項
   html+=`<div style="background:#0a0f1a;border:1px solid #21262d;border-radius:6px;padding:10px 14px;margin-top:14px;">
     <div style="font-size:9px;color:#374151;letter-spacing:1px;margin-bottom:5px;">⚠ 使用提醒</div>
