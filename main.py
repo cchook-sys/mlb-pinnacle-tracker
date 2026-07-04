@@ -716,6 +716,7 @@ async def get_summary():
 
     recommendations = []
     watch_list      = []
+    all_items       = []
 
     for d in docs:
         snaps = d.get("snapshots", [])
@@ -826,9 +827,16 @@ async def get_summary():
             recommendations.append(item)
         elif steam_score >= 3 or ml_sig != "FLAT" or edge_steam:
             watch_list.append(item)
+        all_items.append(item)
 
     recommendations.sort(key=lambda x: x["steam_score"], reverse=True)
     watch_list.sort(key=lambda x: x["steam_score"], reverse=True)
+
+    # 兩個清單都空時，顯示今日最接近門檻的前3場，讓使用者確認系統運作中
+    near_misses = []
+    if not recommendations and not watch_list and all_items:
+        all_items.sort(key=lambda x: x["steam_score"], reverse=True)
+        near_misses = all_items[:3]
 
     stats_docs = await get_db()["model_stats"].find({"period_days": 30}).to_list(1)
     stats_30d  = stats_docs[0] if stats_docs else {}
@@ -845,6 +853,7 @@ async def get_summary():
         "total_games":     len(docs),
         "recommendations": recommendations[:5],
         "watch_list":      watch_list[:5],
+        "near_misses":     near_misses,
         "historical_ref": {
             "period":    "近30天",
             "win_rate":  stats_30d.get("win_rate", 0),
