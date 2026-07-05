@@ -494,15 +494,13 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
   </div>
 </div>
 
-</div><!-- /app -->
-
 <!-- SUMMARY VIEW -->
 <div class="main-history" id="vs" style="display:none;">
   <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;flex:1;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.4);">
     <div style="padding:14px 18px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;background:#161b22;border-radius:12px 12px 0 0;">
       <div>
         <div style="font-size:15px;font-weight:800;color:#cdd9e5;">🌙 睡前下注總結</div>
-        <div style="font-size:10px;color:#545d68;margin-top:2px;">台灣時間 22:00 前查看 · 針對今日場次產生推薦</div>
+        <div style="font-size:10px;color:#545d68;margin-top:2px;">台灣時間 22:35 後查看最準確 · 針對今日場次產生推薦</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button onclick="copySummary()" style="font-size:10px;font-weight:700;padding:5px 12px;border-radius:5px;border:1px solid #30363d;background:#1c2333;color:#768390;cursor:pointer;font-family:inherit;" id="copy-summary-btn">📋 複製清單</button>
@@ -514,6 +512,8 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
     </div>
   </div>
 </div>
+
+</div><!-- /app -->
 
 <!-- GLOSSARY MODAL -->
 <div class="modal-bg" id="glossary" onclick="if(event.target===this)this.classList.remove('open')" style="align-items:flex-start;padding:20px;">
