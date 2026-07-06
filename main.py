@@ -67,6 +67,30 @@ def is_sharp_money(td: float, mld: float) -> bool:
     # ML 同步移動（同方向或反方向都算介入）
     return abs(mld) >= ML_THRESHOLD
 
+# ── 開賽前快照過濾 ────────────────────────────────────────────────────────────
+def pregame_snaps(doc) -> list:
+    """
+    只回傳開賽前的快照（修復 Live 盤污染：開賽後總分隨得分暴漲會製造假信號）
+    """
+    snaps = doc.get("snapshots", [])
+    ct_str = doc.get("commence_time")
+    if not ct_str:
+        return snaps
+    try:
+        ct = datetime.fromisoformat(ct_str.replace("Z", "+00:00"))
+    except Exception:
+        return snaps
+    out = []
+    for s in snaps:
+        ts = s.get("ts")
+        if isinstance(ts, datetime):
+            ts_aware = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            if ts_aware < ct:
+                out.append(s)
+        else:
+            out.append(s)  # 無法判斷時保留
+    return out
+
 # ── Signal（新門檻）──────────────────────────────────────────────────────────
 def signal_from_snaps(snaps: list) -> dict:
     valid = [s for s in snaps if s.get("total") is not None]
@@ -171,6 +195,16 @@ async def fetch_and_store_odds(force: bool = False) -> dict:
         stored = skipped = 0
 
         for g in games:
+            # ── 修復（2026-07-06）：跳過已開賽的比賽 ─────────────────
+            # 開賽後 API 回傳的是 Live 盤口（總分隨得分暴漲，如 7→17.5）
+            # 會製造假信號污染 delta 計算，必須過濾
+            try:
+                gct = datetime.fromisoformat(g["commence_time"].replace("Z","+00:00"))
+                if gct <= ts:
+                    continue  # 已開賽，不再記錄快照
+            except Exception:
+                pass
+
             pin     = next((b for b in g.get("bookmakers", []) if b["key"] == BOOKMAKER), None)
             if not pin: continue
             totals  = next((m for m in pin["markets"] if m["key"] == "totals"),  None)
@@ -267,7 +301,7 @@ async def fetch_and_settle():
                 game_doc = await snaps_col.find_one({"game_id": s["id"]})
             if not game_doc: continue
 
-            snaps  = game_doc.get("snapshots", [])
+            snaps  = pregame_snaps(game_doc)
             sig    = signal_from_snaps(snaps)
             pick   = pick_from_signal(sig, game_doc)
             total  = (game_doc.get("open") or {}).get("total")
@@ -455,7 +489,7 @@ async def get_games():
     docs  = await get_db()["snapshots"].find({"date": today}).sort("commence_time",1).to_list(50)
     result= []
     for d in docs:
-        snaps = d.get("snapshots", [])
+        snaps = pregame_snaps(d)
         first = snaps[0]  if snaps else {}
         last  = snaps[-1] if snaps else {}
         sig   = signal_from_snaps(snaps)
@@ -543,7 +577,7 @@ async def get_history():
     for d in snap_docs:
         if d["game_id"] in seen_ids:
             continue  # 已在 history 裡，跳過
-        snaps = d.get("snapshots", [])
+        snaps = pregame_snaps(d)
         if len(snaps) < 2:
             continue
         sig   = signal_from_snaps(snaps)
@@ -719,7 +753,7 @@ async def get_summary():
     all_items       = []
 
     for d in docs:
-        snaps = d.get("snapshots", [])
+        snaps = pregame_snaps(d)
         # 快照門檻降低：≥2 筆就進入評估（睡前總結時間快照應已夠）
         if len(snaps) < 2:
             continue
