@@ -1977,22 +1977,27 @@ function renderHist(data){
   let w=0,l=0,p=0,rw=0,rl=0;
   tb.innerHTML=data.map(g=>{
     const d=g.total_delta||0;
-    const isRec=g.recommended||Math.abs(d)>=2.0;
-    const grade=isRec?'⚡ 推薦':'🔥 蒸汽';
+    const isWatch=g.watch_only||false;
+    const isRec=!isWatch&&(g.recommended||Math.abs(d)>=1.5);
+    const grade=g.grade||(isRec?'⚡ 推薦':'🔥 蒸汽');
     const ds=d===0?'─':d>0?`<span style="color:#f97316;font-weight:700">▲+${d}</span>`:`<span style="color:#38bdf8;font-weight:700">▼${d}</span>`;
-    let rb='<span class="rb rn">未結算</span>';
-    if(g.result==='WIN'){rb='<span class="rb rw">✓ 過盤</span>';w++;if(isRec)rw++;}
-    if(g.result==='LOSS'){rb='<span class="rb rl">✗ 未過</span>';l++;if(isRec)rl++;}
-    if(g.result==='PUSH'){rb='<span class="rb rp">~ Push</span>';p++;}
+    let rb=isWatch?'<span style="font-size:9px;color:#374151;">不列入統計</span>':'<span class="rb rn">未結算</span>';
+    if(!isWatch){
+      if(g.result==='WIN'){rb='<span class="rb rw">✓ 過盤</span>';w++;if(isRec)rw++;}
+      if(g.result==='LOSS'){rb='<span class="rb rl">✗ 未過</span>';l++;if(isRec)rl++;}
+      if(g.result==='PUSH'){rb='<span class="rb rp">~ Push</span>';p++;}
+    }
     let co='─';
-    if(g.result==='LOSS'&&g.pick)
-      co=g.pick.includes('OVER')?'<span style="color:#38bdf8">↓ 下次考慮小分</span>':'<span style="color:#f97316">↑ 下次考慮大分</span>';
-    else if(g.result==='WIN')co='<span style="color:#4ade80">✓ 方向正確</span>';
-    return `<tr class="${isRec?'rec-row':'steam-row'}">
+    if(!isWatch){
+      if(g.result==='LOSS'&&g.pick)
+        co=g.pick.includes('OVER')?'<span style="color:#38bdf8">↓ 下次考慮小分</span>':'<span style="color:#f97316">↑ 下次考慮大分</span>';
+      else if(g.result==='WIN')co='<span style="color:#4ade80">✓ 方向正確</span>';
+    }
+    return `<tr class="${isRec?'rec-row':'steam-row'}" style="${isWatch?'opacity:.45;':''}">
       <td>
         <div style="font-weight:700;font-size:12px">${(g.away||'').split(' ').pop()} @ ${(g.home||'').split(' ').pop()}</div>
         <div style="font-size:10px;color:var(--dim);margin-top:1px">${fet(g.commence_time)}</div>
-        <span class="grade-badge ${isRec?'gb-rec':'gb-steam'}">${grade}</span>
+        <span class="grade-badge ${isRec?'gb-rec':'gb-steam'}" style="${isWatch?'background:transparent;color:#545d68;border-color:#1e2d42;':''}">${grade}</span>
         ${g.from_snapshots?'<span style="font-size:8px;color:#374151;margin-left:4px;">快照備援</span>':''}
       </td>
       <td style="font-family:monospace;color:#6e7d94">${g.open_total??'—'}</td>
