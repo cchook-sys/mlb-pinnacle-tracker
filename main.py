@@ -548,7 +548,10 @@ async def get_history():
     for d in hist_docs:
         delta = d.get("total_delta", 0)
         pick  = d.get("pick")
-        if abs(delta) >= THRESHOLD_STEAM and pick:
+        a     = abs(delta)
+        # ≥1.0 有pick = 正式結算；0.5–0.9 = 微動參考（不列入勝率統計）
+        if a >= 0.5:
+            is_watch = a < THRESHOLD_STEAM or not pick
             seen_ids.add(d["game_id"])
             result.append({
                 "game_id":       d["game_id"],
@@ -562,11 +565,12 @@ async def get_history():
                 "ml_delta":      d.get("ml_delta", 0),
                 "pick":          pick,
                 "actual_total":  d.get("actual_total"),
-                "result":        d.get("result"),
+                "result":        d.get("result") if not is_watch else None,
                 "signal":        d.get("signal", {}),
                 "sharp":         d.get("sharp", False),
-                "recommended":   abs(delta) >= THRESHOLD_RECOMMEND,
-                "grade":         "⚡ 推薦" if abs(delta) >= THRESHOLD_RECOMMEND else "🔥 蒸汽",
+                "recommended":   a >= THRESHOLD_RECOMMEND,
+                "watch_only":    is_watch,
+                "grade":         "⚡ 推薦" if a >= THRESHOLD_RECOMMEND else ("🔥 蒸汽" if not is_watch else "👁 微動"),
             })
 
     # 備用：從 snapshots 撈昨天有信號但可能沒進 history 的場次
