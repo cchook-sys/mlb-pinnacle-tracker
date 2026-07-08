@@ -1974,36 +1974,60 @@ async function fetchHist(){
 function renderHist(data){
   const tb=document.getElementById('htb');
   if(!data.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--dim)">昨日（含前天）尚無蒸汽信號記錄（移動 ≥ 1.0）<br><span style="font-size:10px;color:#374151;">若有場次但未顯示，可能是結算程式尚未抓到賽果</span></td></tr>';return;}
-  let w=0,l=0,p=0,rw=0,rl=0;
+  let w=0,l=0,p=0,rw=0,rl=0,mw=0,ml_=0;
   tb.innerHTML=data.map(g=>{
     const d=g.total_delta||0;
     const isWatch=g.watch_only||false;
-    const isRec=!isWatch&&(g.recommended||Math.abs(d)>=1.5);
+    const hasML=!!g.ml_pick;
+    const isRec=!isWatch&&!hasML&&(g.recommended||Math.abs(d)>=1.5);
     const grade=g.grade||(isRec?'⚡ 推薦':'🔥 蒸汽');
     const ds=d===0?'─':d>0?`<span style="color:#f97316;font-weight:700">▲+${d}</span>`:`<span style="color:#38bdf8;font-weight:700">▼${d}</span>`;
+
+    // O/U 結果
     let rb=isWatch?'<span style="font-size:9px;color:#374151;">不列入統計</span>':'<span class="rb rn">未結算</span>';
-    if(!isWatch){
+    if(!isWatch&&g.result){
       if(g.result==='WIN'){rb='<span class="rb rw">✓ 過盤</span>';w++;if(isRec)rw++;}
       if(g.result==='LOSS'){rb='<span class="rb rl">✗ 未過</span>';l++;if(isRec)rl++;}
       if(g.result==='PUSH'){rb='<span class="rb rp">~ Push</span>';p++;}
     }
+    // ML 獨贏結果
+    let mlRow='';
+    if(hasML){
+      const mlTeam=(g.ml_pick||'').split(' ').pop();
+      let mlBadge='<span class="rb rn">未結算</span>';
+      if(g.ml_result==='WIN'){mlBadge='<span class="rb rw">✓ 獨贏過</span>';mw++;}
+      if(g.ml_result==='LOSS'){mlBadge='<span class="rb rl">✗ 獨贏未過</span>';ml_++;}
+      const scoreTxt=(g.home_runs!=null&&g.away_runs!=null)?`${g.away_runs}:${g.home_runs}`:'—';
+      mlRow=`<div style="margin-top:3px;font-size:10px;color:#d2a8ff;">🦈 押 ${mlTeam} 獨贏 · 比分 ${scoreTxt} ${mlBadge}</div>`;
+    }
+    // 若只有 ML 沒有 O/U pick，把 ML 結果放主結果欄
+    if(hasML&&!g.result){
+      if(g.ml_result==='WIN') rb='<span class="rb rw">✓ 獨贏過</span>';
+      else if(g.ml_result==='LOSS') rb='<span class="rb rl">✗ 獨贏未過</span>';
+    }
+
     let co='─';
-    if(!isWatch){
+    if(!isWatch&&g.result){
       if(g.result==='LOSS'&&g.pick)
         co=g.pick.includes('OVER')?'<span style="color:#38bdf8">↓ 下次考慮小分</span>':'<span style="color:#f97316">↑ 下次考慮大分</span>';
       else if(g.result==='WIN')co='<span style="color:#4ade80">✓ 方向正確</span>';
+    } else if(hasML&&g.ml_result){
+      co=g.ml_result==='WIN'?'<span style="color:#4ade80">✓ 獨贏正確</span>':'<span style="color:#ff7b72">✗ 獨贏失準</span>';
     }
-    return `<tr class="${isRec?'rec-row':'steam-row'}" style="${isWatch?'opacity:.45;':''}">
+
+    const rowDim=isWatch&&!hasML;
+    return `<tr class="${isRec?'rec-row':'steam-row'}" style="${rowDim?'opacity:.45;':''}">
       <td>
         <div style="font-weight:700;font-size:12px">${(g.away||'').split(' ').pop()} @ ${(g.home||'').split(' ').pop()}</div>
         <div style="font-size:10px;color:var(--dim);margin-top:1px">${fet(g.commence_time)}</div>
-        <span class="grade-badge ${isRec?'gb-rec':'gb-steam'}" style="${isWatch?'background:transparent;color:#545d68;border-color:#1e2d42;':''}">${grade}</span>
+        <span class="grade-badge ${isRec?'gb-rec':'gb-steam'}" style="${rowDim?'background:transparent;color:#545d68;border-color:#1e2d42;':''}">${grade}</span>
         ${g.from_snapshots?'<span style="font-size:8px;color:#374151;margin-left:4px;">快照備援</span>':''}
+        ${mlRow}
       </td>
       <td style="font-family:monospace;color:#6e7d94">${g.open_total??'—'}</td>
       <td style="font-family:monospace;font-weight:800;font-size:13px">${g.close_total??'—'}</td>
       <td>${ds}</td>
-      <td style="font-weight:800;color:${g.pick?.includes('OVER')?'#f97316':'#38bdf8'}">${g.pick||'<span style="color:var(--dim)">觀望</span>'}</td>
+      <td style="font-weight:800;color:${g.pick?.includes('OVER')?'#f97316':'#38bdf8'}">${g.pick||(hasML?'<span style="color:#d2a8ff">獨贏</span>':'<span style="color:var(--dim)">觀望</span>')}</td>
       <td style="font-family:monospace;font-size:16px;font-weight:900">${g.actual_total??'—'}</td>
       <td>${rb}</td>
       <td style="font-size:11px">${co}</td>
@@ -2020,6 +2044,7 @@ function renderHist(data){
       <div style="font-weight:800;color:#cdd9e5;">${w}勝 ${l}敗 ${p}平</div>
       <div style="color:${wr>=55?'#56d364':wr>=45?'#f0b429':'#ff7b72'};font-weight:800;font-size:13px;">勝率 ${wr}%</div>
       ${rtot>0?`<div style="color:#39ff14;font-size:10px;">⚡ 推薦 ${rw}勝${rl}敗 (${rwr}%)</div>`:''}
+      ${(mw+ml_)>0?`<div style="color:#d2a8ff;font-size:10px;">🦈 獨贏 ${mw}勝${ml_}敗 (${Math.round(mw/(mw+ml_)*100)}%)</div>`:''}
       <div style="color:${roi100>=0?'#56d364':'#ff7b72'};font-size:10px;margin-top:2px;">
         每注$100 理論績效: ${roi100>=0?'+':''}$${roi100}
       </div>
