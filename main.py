@@ -310,6 +310,26 @@ async def fetch_and_settle():
                 if "OVER"  in pick: result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
                 if "UNDER" in pick: result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
 
+            # ── ML 獨贏結算（2026-07-08 新增：之前獨贏推薦從未被結算）──────
+            # 取各隊得分
+            home_runs = away_runs = None
+            for sc in score_data:
+                try:
+                    if sc.get("name") == game_doc["home"]: home_runs = int(sc["score"])
+                    elif sc.get("name") == game_doc["away"]: away_runs = int(sc["score"])
+                except Exception:
+                    pass
+            ml_sig  = sig.get("ml", "FLAT")
+            ml_pick = None      # 依前端慣例：STEAM_HOME=押客隊，STEAM_AWAY=押主隊
+            if ml_sig == "STEAM_HOME":   ml_pick = "AWAY"
+            elif ml_sig == "STEAM_AWAY": ml_pick = "HOME"
+            ml_pick_team = None
+            ml_result    = None
+            if ml_pick and home_runs is not None and away_runs is not None and home_runs != away_runs:
+                winner = "HOME" if home_runs > away_runs else "AWAY"
+                ml_result    = "WIN" if winner == ml_pick else "LOSS"
+                ml_pick_team = game_doc["away"] if ml_pick == "AWAY" else game_doc["home"]
+
             settle_date = game_doc.get("date", yesterday)
             entry = {
                 "game_id":       s["id"],
@@ -327,6 +347,10 @@ async def fetch_and_settle():
                 "pick":          pick,
                 "actual_total":  total_runs,
                 "result":        result,
+                "ml_pick":       ml_pick_team,   # 獨贏推薦隊伍
+                "ml_result":     ml_result,      # 獨贏結果 WIN/LOSS
+                "home_runs":     home_runs,
+                "away_runs":     away_runs,
                 "settled_at":    ts,
             }
             await hist_col.update_one(
@@ -546,12 +570,14 @@ async def get_history():
     seen_ids = set()
 
     for d in hist_docs:
-        delta = d.get("total_delta", 0)
-        pick  = d.get("pick")
-        a     = abs(delta)
-        # ≥1.0 有pick = 正式結算；0.5–0.9 = 微動參考（不列入勝率統計）
-        if a >= 0.5:
-            is_watch = a < THRESHOLD_STEAM or not pick
+        delta   = d.get("total_delta", 0)
+        pick    = d.get("pick")
+        ml_pick = d.get("ml_pick")
+        a       = abs(delta)
+        # ≥1.0有pick 或 有ML獨贏推薦 = 正式結算；0.5–0.9無ML = 微動參考
+        if a >= 0.5 or ml_pick:
+            has_ou  = a >= THRESHOLD_STEAM and pick
+            is_watch = not has_ou and not ml_pick
             seen_ids.add(d["game_id"])
             result.append({
                 "game_id":       d["game_id"],
@@ -565,12 +591,16 @@ async def get_history():
                 "ml_delta":      d.get("ml_delta", 0),
                 "pick":          pick,
                 "actual_total":  d.get("actual_total"),
-                "result":        d.get("result") if not is_watch else None,
+                "result":        d.get("result") if has_ou else None,
+                "ml_pick":       ml_pick,
+                "ml_result":     d.get("ml_result"),
+                "home_runs":     d.get("home_runs"),
+                "away_runs":     d.get("away_runs"),
                 "signal":        d.get("signal", {}),
                 "sharp":         d.get("sharp", False),
                 "recommended":   a >= THRESHOLD_RECOMMEND,
                 "watch_only":    is_watch,
-                "grade":         "⚡ 推薦" if a >= THRESHOLD_RECOMMEND else ("🔥 蒸汽" if not is_watch else "👁 微動"),
+                "grade":         "⚡ 推薦" if a >= THRESHOLD_RECOMMEND else ("🔥 蒸汽" if has_ou else ("🦈 獨贏" if ml_pick else "👁 微動")),
             })
 
     # 備用：從 snapshots 撈昨天有信號但可能沒進 history 的場次
