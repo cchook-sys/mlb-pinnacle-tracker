@@ -838,6 +838,32 @@ function steamScore(s, snaps, mins){
   if(mins>=120&&mins<=480)        bonus+=0.5;
   if(s.rec&&s.mlSig!=='FLAT')     bonus+=1;
 
+  // ── 信號品質增強（2026-07）──────────────────────────
+  // 關鍵數字穿越：MLB 結果集中在 7–9.5，穿越 = 莊家大幅重估
+  const KEYS=[7.0,7.5,8.0,8.5,9.0,9.5];
+  const openT=snaps.length?snaps[0].total:null;
+  const closeT=snaps.length?snaps[snaps.length-1].total:null;
+  let kx=0;
+  if(openT!=null&&closeT!=null&&openT!==closeT){
+    const lo=Math.min(openT,closeT),hi=Math.max(openT,closeT);
+    kx=KEYS.filter(k=>lo<k&&k<hi).length;
+  }
+  if(kx>=2)      bonus+=1.0;
+  else if(kx===1)bonus+=0.5;
+  // 單向移動比率：1.0=單向推進（強）、<0.6=震盪（扣分）
+  let owr=1.0;
+  const tvals=snaps.map(x=>x.total).filter(v=>v!=null);
+  if(tvals.length>=3){
+    const net=Math.abs(tvals[tvals.length-1]-tvals[0]);
+    let path=0;
+    for(let i=1;i<tvals.length;i++)path+=Math.abs(tvals[i]-tvals[i-1]);
+    owr=path>0?Math.round(net/path*100)/100:1.0;
+  }
+  if(a>=1.0){
+    if(owr>=0.9)     bonus+=0.5;
+    else if(owr<0.6) bonus-=1.0;
+  }
+
   let settled=false;
   if(snaps.length>=2){
     let sc=0;
@@ -855,7 +881,7 @@ function steamScore(s, snaps, mins){
 
   const col=score>=8?'#39ff14':score>=6?'#ffb74d':score>=4?'#f0b429':'#545d68';
   const label=score>=8?'極強':score>=6?'強':score>=4?'中等':score>=2?'弱':'觀察';
-  return{score, col, label, settled, edgeSteam};
+  return{score, col, label, settled, edgeSteam, kx, owr};
 }
 
 // ── ENTRY REASON ──────────────────────────────────────────────────────────────
@@ -866,6 +892,26 @@ function entryReason(s, e, g, snaps, mins){
   const a=Math.abs(s.d);
   const home=(g.home||'').split(' ').pop();
   const away=(g.away||'').split(' ').pop();
+
+  // 關鍵數字穿越 + 單向性（信號品質）
+  const KEYS=[7.0,7.5,8.0,8.5,9.0,9.5];
+  const _o=snaps.length?snaps[0].total:null;
+  const _c=snaps.length?snaps[snaps.length-1].total:null;
+  if(_o!=null&&_c!=null&&_o!==_c){
+    const lo=Math.min(_o,_c),hi=Math.max(_o,_c);
+    const crossed=KEYS.filter(k=>lo<k&&k<hi);
+    if(crossed.length>=1){
+      reasons.push(`盤口穿越關鍵數字 ${crossed.join('、')} → MLB 結果高頻區，莊家大幅重估比賽`);
+    }
+  }
+  const tv=snaps.map(x=>x.total).filter(v=>v!=null);
+  if(tv.length>=3&&a>=1.0){
+    const net=Math.abs(tv[tv.length-1]-tv[0]);
+    let path=0;for(let i=1;i<tv.length;i++)path+=Math.abs(tv[i]-tv[i-1]);
+    const owr=path>0?net/path:1;
+    if(owr>=0.9)      reasons.push('盤口單向推進無回檔 → 資金方向高度一致');
+    else if(owr<0.6)  warnings.push(`盤口來回震盪（單向率${Math.round(owr*100)/100}）→ 多空拉鋸，信號不可靠`);
+  }
 
   // 主要原因
   if(s.rec){
@@ -1532,6 +1578,8 @@ function renderDetail(g){
           <span>ML同步:<b style="color:${s.mlSig!=='FLAT'?'#56d364':'#374151'}"> ${s.mlSig!=='FLAT'?'+1':'—'}</b></span>
           <span>快照≥5:<b style="color:${(g.snapshot_count||0)>=5?'#56d364':'#374151'}"> ${(g.snapshot_count||0)>=5?'+0.5':'—'}</b></span>
           <span>停滯:<b style="color:${ss.settled?'#56d364':'#374151'}"> ${ss.settled?'+0.5':'等待中'}</b></span>
+          <span title="盤口穿越 7–9.5 關鍵數字的次數，穿越=莊家大幅重估">關鍵穿越:<b style="color:${ss.kx>=1?'#56d364':'#374151'}"> ${ss.kx>=2?'+1':ss.kx===1?'+0.5':'—'}</b></span>
+          <span title="單向率=淨移動/總路徑。1.0=資金持續同向（強）、<0.6=來回震盪（不可靠）">單向率:<b style="color:${ss.owr>=0.9?'#56d364':ss.owr<0.6?'#ff7b72':'#374151'}"> ${ss.owr}</b></span>
         </div>
       </div>
       <button style="background:${e.rdy?'#da3633':e.lbl==='等待停滯'?'#5a4000':'#21262d'};
