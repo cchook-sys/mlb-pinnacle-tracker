@@ -563,7 +563,7 @@ async def get_history():
 
     # 先從 history collection 撈（已結算）
     hist_docs = await get_db()["history"].find(
-        {"date": {"$in": [yesterday, two_days]}}
+        {"date": yesterday}
     ).sort("commence_time", 1).to_list(50)
 
     result = []
@@ -605,7 +605,7 @@ async def get_history():
 
     # 備用：從 snapshots 撈昨天有信號但可能沒進 history 的場次
     snap_docs = await get_db()["snapshots"].find(
-        {"date": {"$in": [yesterday, two_days]}}
+        {"date": yesterday}
     ).sort("commence_time", 1).to_list(50)
 
     for d in snap_docs:
