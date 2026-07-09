@@ -67,6 +67,32 @@ def is_sharp_money(td: float, mld: float) -> bool:
     # ML 同步移動（同方向或反方向都算介入）
     return abs(mld) >= ML_THRESHOLD
 
+# ── 大小分信號增強（2026-07 新增）─────────────────────────────────────────────
+KEY_NUMBERS = [7.0, 7.5, 8.0, 8.5, 9.0, 9.5]
+
+def key_cross_count(open_t, close_t) -> int:
+    """關鍵數字穿越數：盤口從開盤到現盤穿越幾個 MLB 高頻結果數字（7–9.5）"""
+    if open_t is None or close_t is None or open_t == close_t:
+        return 0
+    lo, hi = min(open_t, close_t), max(open_t, close_t)
+    return sum(1 for k in KEY_NUMBERS if lo < k < hi)
+
+def one_way_ratio(snaps) -> float:
+    """
+    單向移動比率 = |淨移動| / 總路徑長
+    1.0 = 完全單向（資金持續同方向，強）
+    <0.6 = 來回震盪（多空拉鋸，不可靠）
+    快照不足回傳 1.0（不影響評分）
+    """
+    totals = [s.get("total") for s in snaps if s.get("total") is not None]
+    if len(totals) < 3:
+        return 1.0
+    net  = abs(totals[-1] - totals[0])
+    path = sum(abs(totals[i] - totals[i-1]) for i in range(1, len(totals)))
+    if path == 0:
+        return 1.0
+    return round(net / path, 2)
+
 # ── 開賽前快照過濾 ────────────────────────────────────────────────────────────
 def pregame_snaps(doc) -> list:
     """
@@ -828,6 +854,17 @@ async def get_summary():
         if 120 <= mins_to_game <= 480:    bonus += 0.5
         if grade == "RECOMMEND" and ml_sig != "FLAT": bonus += 1
 
+        # ── 信號品質增強（2026-07 新增）─────────────────────────────
+        open_t  = snaps[0].get("total") if snaps else None
+        close_t = snaps[-1].get("total") if snaps else None
+        kx      = key_cross_count(open_t, close_t)   # 關鍵數字穿越
+        owr     = one_way_ratio(snaps)               # 單向移動比率
+        if kx >= 2:   bonus += 1.0   # 穿越兩個以上關鍵數字 = 莊家大幅重估
+        elif kx == 1: bonus += 0.5   # 穿越一個關鍵數字
+        if abs(td) >= 1.0:
+            if owr >= 0.9:   bonus += 0.5   # 單向推進，資金方向一致
+            elif owr < 0.6:  bonus -= 1.0   # 來回震盪，多空拉鋸不可靠
+
         # 停滯判斷
         settled = False
         settled_count = 0
@@ -861,6 +898,8 @@ async def get_summary():
             warnings.append("小分+ML未同步為歷史最弱組合（25%勝率），建議略過或減注")
         if not settled and steam_score >= 5:
             warnings.append("盤口仍在移動，建議等停滯後再確認")
+        if abs(td) >= 1.0 and owr < 0.6:
+            warnings.append(f"盤口來回震盪（單向率{owr}），多空拉鋸信號不可靠")
         if mins_to_game > 720:
             warnings.append("距開賽超過12小時，信號可能繼續變化")
         if len(snaps) < 5:
@@ -881,6 +920,8 @@ async def get_summary():
             "pick":           pick,
             "settled":        settled,
             "settled_count":  settled_count,
+            "key_cross":      kx,
+            "one_way_ratio":  owr,
             "edge_steam":     edge_steam,
             "warnings":       warnings,
             "open_total":    (snaps[0].get("total") if snaps else None),
