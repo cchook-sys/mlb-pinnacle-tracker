@@ -1,6 +1,15 @@
 """
-MLB Pinnacle Tracker v5.0
-新增：
+MLB Pinnacle Tracker v5.1
+
+v5.1（2026-07-13）：
+- 影子結算：被 sharp 過濾、不產生正式 pick 的方向信號（尤其 1.0–1.4 公眾錢）
+  仍計算假設性結果存入 history，讓 /calibration 能持續驗證過濾規則是否正確。
+  不影響 /stats、/model、/history、/corrections（那些仍只看正式 pick/result）。
+- /calibration 改用 shadow 資料分析（舊資料自動回退 result/pick），
+  並回傳 newly_visible_filtered 顯示影子結算多看見的場數。
+- 清掉 /history 重複的路由裝飾器。
+
+v5.0：
 - 銳錢 vs 公眾錢判斷（total + ml 同步移動才算銳錢）
 - 歷史保留整個 MLB 賽季（180天）
 - 7/30 日滾動勝率 + ROI
@@ -177,7 +186,7 @@ def signal_from_snaps(snaps: list) -> dict:
         "snap_count":  len(valid),
     }
 
-def pick_from_signal(sig, game):
+def pick_from_signal(sig, game, ignore_sharp_filter=False):
     d     = sig.get("delta", 0)
     grade = sig.get("grade", "FLAT")
     sharp = sig.get("sharp", False)
@@ -191,7 +200,8 @@ def pick_from_signal(sig, game):
     if grade not in ("RECOMMEND", "STEAM"):
         return None
     # ── 校正（2026-07 數據）：蒸汽級(1.0-1.4)公眾錢勝率僅50%，必須ML同步才給建議
-    if grade == "STEAM" and not sharp:
+    # ignore_sharp_filter=True 時跳過此過濾（供影子結算計算假設性結果，見 fetch_and_settle）
+    if grade == "STEAM" and not sharp and not ignore_sharp_filter:
         return None
     if d >= THRESHOLD_STEAM:   return f"OVER {total}"
     if d <= -THRESHOLD_STEAM:  return f"UNDER {total}"
@@ -336,6 +346,16 @@ async def fetch_and_settle():
                 if "OVER"  in pick: result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
                 if "UNDER" in pick: result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
 
+            # ── 影子結算（2026-07-13 新增）─────────────────────────────
+            # 對「STEAM 且非銳錢」等被 sharp 過濾、不產生正式 pick 的方向信號，
+            # 仍算出假設性結果存入 history，供 /calibration 持續驗證過濾規則是否正確。
+            # 不影響 /stats、/model、/history、/corrections（那些仍只看正式 pick/result）。
+            shadow_pick   = pick_from_signal(sig, game_doc, ignore_sharp_filter=True)
+            shadow_result = None
+            if shadow_pick and total:
+                if "OVER"  in shadow_pick: shadow_result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
+                if "UNDER" in shadow_pick: shadow_result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
+
             # ── ML 獨贏結算（2026-07-08 新增：之前獨贏推薦從未被結算）──────
             # 取各隊得分
             home_runs = away_runs = None
@@ -373,6 +393,8 @@ async def fetch_and_settle():
                 "pick":          pick,
                 "actual_total":  total_runs,
                 "result":        result,
+                "shadow_pick":   shadow_pick,      # 影子結算：忽略 sharp 過濾的假設 pick
+                "shadow_result": shadow_result,    # 影子結算：假設性 WIN/LOSS/PUSH（僅供 /calibration）
                 "ml_pick":       ml_pick_team,   # 獨贏推薦隊伍
                 "ml_result":     ml_result,      # 獨贏結果 WIN/LOSS
                 "home_runs":     home_runs,
@@ -506,11 +528,11 @@ async def lifespan(app: FastAPI):
     await fetch_and_settle()
     await daily_model_correction()
     asyncio.create_task(scheduler())
-    log.info(f"⏰ v5.0 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
+    log.info(f"⏰ v5.1 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
     yield
     if client_db: client_db.close()
 
-app = FastAPI(title="MLB Pinnacle Tracker v5.0", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker v5.1", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET","POST","OPTIONS"], allow_headers=["*"])
 
@@ -519,7 +541,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 async def root():
     et = et_now()
     return {
-        "status": "ok", "version": "5.0",
+        "status": "ok", "version": "5.1",
         "et_time": et.strftime("%Y-%m-%d %H:%M ET"),
         "active":  is_active_hours(),
         "schedule": f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
@@ -580,7 +602,6 @@ async def get_games():
         })
     return result
 
-@app.get("/history")
 @app.get("/history")
 async def get_history():
     ts        = utc_now()
@@ -994,13 +1015,21 @@ async def get_calibration():
     """
     ts       = utc_now()
     cutoff   = et_date_str(ts - timedelta(days=30))
+    # 納入影子結算（shadow_*）：讓被 sharp 過濾、無正式 pick 的方向信號
+    # （尤其 1.0–1.4 公眾錢）也能被校正分析看見。
+    # 舊資料沒有 shadow_* 時，自動回退到正式的 result / pick。
     docs     = await get_db()["history"].find(
-        {"date": {"$gte": cutoff}, "result": {"$in": ["WIN","LOSS"]}}
+        {"date": {"$gte": cutoff},
+         "$or": [{"shadow_result": {"$in": ["WIN","LOSS"]}},
+                 {"result":        {"$in": ["WIN","LOSS"]}}]}
     ).to_list(500)
 
+    def cal_result(d): return d.get("shadow_result") or d.get("result")
+    def cal_pick(d):   return d.get("shadow_pick")   or d.get("pick") or ""
+
     def bucket_stats(items):
-        w = sum(1 for d in items if d.get("result")=="WIN")
-        l = sum(1 for d in items if d.get("result")=="LOSS")
+        w = sum(1 for d in items if cal_result(d)=="WIN")
+        l = sum(1 for d in items if cal_result(d)=="LOSS")
         t = w + l
         return {"wins": w, "losses": l, "total": t,
                 "win_rate": round(w/t*100,1) if t>0 else None,
@@ -1022,16 +1051,16 @@ async def get_calibration():
 
     # ── 分桶3：大分 vs 小分方向 ──
     by_direction = {
-        "OVER 大分":  bucket_stats([d for d in docs if d.get("pick","").startswith("OVER")]),
-        "UNDER 小分": bucket_stats([d for d in docs if d.get("pick","").startswith("UNDER")]),
+        "OVER 大分":  bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")]),
+        "UNDER 小分": bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER")]),
     }
 
     # ── 分桶4：移動方向 × 結果的交叉 ──
     by_cross = {
-        "大分推薦+銳錢":  bucket_stats([d for d in docs if d.get("pick","").startswith("OVER") and d.get("sharp")]),
-        "大分推薦+公眾":  bucket_stats([d for d in docs if d.get("pick","").startswith("OVER") and not d.get("sharp")]),
-        "小分推薦+銳錢":  bucket_stats([d for d in docs if d.get("pick","").startswith("UNDER") and d.get("sharp")]),
-        "小分推薦+公眾":  bucket_stats([d for d in docs if d.get("pick","").startswith("UNDER") and not d.get("sharp")]),
+        "大分+銳錢":  bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")  and d.get("sharp")]),
+        "大分+公眾":  bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")  and not d.get("sharp")]),
+        "小分+銳錢":  bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER") and d.get("sharp")]),
+        "小分+公眾":  bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER") and not d.get("sharp")]),
     }
 
     # ── 自動建議 ──
@@ -1045,15 +1074,23 @@ async def get_calibration():
     if not suggestions:
         suggestions.append("樣本尚不足以做出調整建議（各桶需 ≥5 場），繼續累積數據")
 
+    # 因影子結算而新增可見（過去被 sharp 過濾、正式 result 為空）的場數
+    shadow_only = sum(
+        1 for d in docs
+        if d.get("shadow_result") in ("WIN", "LOSS")
+        and d.get("result") not in ("WIN", "LOSS")
+    )
+
     return {
-        "period":       "近30天",
-        "sample_size":  len(docs),
-        "by_delta":     by_delta,
-        "by_money":     by_money,
-        "by_direction": by_direction,
-        "by_cross":     by_cross,
-        "suggestions":  suggestions,
-        "generated_at": ts.isoformat(),
+        "period":                 "近30天",
+        "sample_size":            len(docs),
+        "newly_visible_filtered": shadow_only,   # 影子結算後多看見的被過濾場數
+        "by_delta":               by_delta,
+        "by_money":               by_money,
+        "by_direction":           by_direction,
+        "by_cross":               by_cross,
+        "suggestions":            suggestions,
+        "generated_at":           ts.isoformat(),
     }
 
 
