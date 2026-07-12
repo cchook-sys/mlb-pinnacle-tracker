@@ -1,23 +1,30 @@
 """
-MLB Pinnacle Tracker v5.1
+MLB Pinnacle Tracker v6.0
 
-v5.1（2026-07-13）：
-- 影子結算：被 sharp 過濾、不產生正式 pick 的方向信號（尤其 1.0–1.4 公眾錢）
-  仍計算假設性結果存入 history，讓 /calibration 能持續驗證過濾規則是否正確。
-  不影響 /stats、/model、/history、/corrections（那些仍只看正式 pick/result）。
-- /calibration 改用 shadow 資料分析（舊資料自動回退 result/pick），
-  並回傳 newly_visible_filtered 顯示影子結算多看見的場數。
-- 清掉 /history 重複的路由裝飾器。
+v6.0（2026-07-12）── 結算基準修正，這是一次「破壞性誠實化」：
+- [重大 BUG 修正] 舊版結算拿「開盤價 open_total」對帳，但 pick 用的是「最新盤口」。
+  盤口 8.0→11.0 時，系統顯示 OVER 11.0 卻拿 8.0 結算 —— 那個價你根本買不到。
+  灌水幅度與 delta 成正比，所以「3.0+ 勝率 85%」「OVER 90%」幾乎可完全由此 bug 解釋。
+- [新] picks collection：在真實決策窗口（ET 10:35 / 台灣 22:35）鎖定 pick 與當下盤口
+  line_at_pick。結算以 line_at_pick 為準 = 你真正買得到的價。鎖定後永不覆蓋。
+- [新] 同時保留 result_vs_open / result_vs_close 三種對照，直接量化灌水幅度。
+- [新] settle_version=6 標記。/calibration 只分析 v6 之後的誠實資料，
+  舊的灌水資料一律排除（會標明排除幾筆）。
+- [修正] 建議引擎：最低樣本 5→20，改用 Wilson 95% 信賴區間對比 -110 損益平衡點
+  52.4%，不再看原始勝率就喊「可提高權重」。
+- [修正] 拆掉源自灌水數據的加分：OVER +0.5 移除（且 OVER 場次幾乎全是銳錢，
+  與銳錢加分重複計算）；3.0+ base 9→7；ML 同步 1.5→1.0。
+- [新] key_cross / one_way_ratio 存入 history 並在 /calibration 分桶 ——
+  這兩個加分至今從未被驗證過（資料根本沒存）。
 
-v5.0：
-- 銳錢 vs 公眾錢判斷（total + ml 同步移動才算銳錢）
-- 歷史保留整個 MLB 賽季（180天）
-- 7/30 日滾動勝率 + ROI
-- 每天 ET 06:00 自動計算模型修正統計
-- 新門檻：≥1.5 推薦 · 1.0–1.4 蒸汽 · 0.5–0.9 觀察
+⚠ 預期：修正後勝率會大幅下修，很可能落在 50% 附近。追平收盤價本來就極難。
+   真實情況也可能是這套系統目前沒有 edge。這是為了看見真相，不是為了看見好數字。
+
+v5.1：影子結算（被 sharp 過濾的信號仍算假設結果供校正）
+v5.0：銳錢/公眾錢判斷、180天保留、7/30日滾動勝率、每日模型統計
 """
 
-import os, asyncio, logging
+import os, asyncio, logging, math
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 
@@ -42,17 +49,46 @@ ACTIVE_END          = 23   # ET 23:00 結束
 FETCH_INTERVAL_MINS = 30   # 每 30 分鐘抓取
 HISTORY_RETAIN_DAYS = 180  # 保留整個 MLB 賽季
 
-# 新門檻
+# 門檻
 THRESHOLD_RECOMMEND = 1.5  # ≥1.5 推薦
 THRESHOLD_STEAM     = 1.0  # 1.0–1.4 蒸汽
 THRESHOLD_WATCH     = 0.5  # 0.5–0.9 觀察
 ML_THRESHOLD        = 15   # ML 移動 ≥ 15 算獨贏信號
+
+# ── 決策窗口（v6.0）──────────────────────────────────────────────────────────
+# 你的實際下注時間：台灣 22:35 = ET 10:35。pick 與盤口在此刻鎖定。
+DECISION_ET_HOUR     = 10
+DECISION_ET_MIN      = 35
+MIN_MINUTES_TO_GAME  = 20   # 距開賽 <20 分鐘視為來不及下注，不鎖定
+
+# ── 統計嚴謹度（v6.0）────────────────────────────────────────────────────────
+SETTLE_VERSION           = 6      # 只有 >= 此版本的結算資料才進 /calibration
+MIN_SAMPLE_FOR_CLAIM     = 20     # 低於此樣本數不下任何結論（舊版是 5，太鬆）
+BREAKEVEN_WR             = 52.4   # -110 賠率的損益平衡勝率
+WILSON_Z                 = 1.96   # 95% 信賴區間
 
 client_db      = None
 db             = None
 _last_fetch_ts = None
 
 def get_db(): return db
+
+# ── Wilson 信賴區間（v6.0）────────────────────────────────────────────────────
+def wilson_interval(wins: int, n: int, z: float = WILSON_Z):
+    """
+    回傳 (下界, 上界)，單位 %。
+    小樣本時原始勝率極不可靠：4 場 2 勝的「50%」，真實區間其實是 15%~85%。
+    只有當「下界 > 損益平衡點」才算真的證明有 edge。
+    """
+    if n <= 0:
+        return (None, None)
+    p      = wins / n
+    denom  = 1 + z*z/n
+    center = p + z*z/(2*n)
+    margin = z * math.sqrt(p*(1-p)/n + z*z/(4*n*n))
+    lo = (center - margin) / denom
+    hi = (center + margin) / denom
+    return (round(lo*100, 1), round(hi*100, 1))
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def utc_now(): return datetime.now(timezone.utc)
@@ -186,10 +222,42 @@ def signal_from_snaps(snaps: list) -> dict:
         "snap_count":  len(valid),
     }
 
-def pick_from_signal(sig, game, ignore_sharp_filter=False):
-    d     = sig.get("delta", 0)
+def pick_direction(sig, ignore_sharp_filter: bool = False):
+    """
+    只回傳方向（OVER / UNDER / None），不綁盤口。
+    盤口由呼叫端決定（鎖定時用 line_at_pick，才是真正買得到的價）。
+    """
     grade = sig.get("grade", "FLAT")
     sharp = sig.get("sharp", False)
+    d     = sig.get("delta", 0)
+    if grade not in ("RECOMMEND", "STEAM"):
+        return None
+    # 蒸汽級(1.0-1.4)公眾錢須 ML 同步才給建議
+    # ignore_sharp_filter=True 時跳過（供影子結算計算假設性結果）
+    if grade == "STEAM" and not sharp and not ignore_sharp_filter:
+        return None
+    if d >= THRESHOLD_STEAM:   return "OVER"
+    if d <= -THRESHOLD_STEAM:  return "UNDER"
+    return None
+
+def ou_result(pick_str, line, runs):
+    """
+    大小分結算。line 是「對帳用的盤口」——v6.0 起一律傳 line_at_pick（可下注價），
+    不再傳 open_total（買不到的陳舊價，是舊版勝率灌水的來源）。
+    """
+    if not pick_str or line is None or runs is None:
+        return None
+    if "OVER" in pick_str:
+        return "WIN" if runs > line else "LOSS" if runs < line else "PUSH"
+    if "UNDER" in pick_str:
+        return "WIN" if runs < line else "LOSS" if runs > line else "PUSH"
+    return None
+
+def pick_from_signal(sig, game, ignore_sharp_filter=False):
+    """即時顯示用（/summary、/history 備援）。盤口取最新快照。"""
+    direction = pick_direction(sig, ignore_sharp_filter)
+    if not direction:
+        return None
     total = None
     if game.get("latest"):
         total = game["latest"].get("total")
@@ -197,15 +265,7 @@ def pick_from_signal(sig, game, ignore_sharp_filter=False):
         snaps = game["snapshots"]
         if snaps:
             total = snaps[-1].get("total")
-    if grade not in ("RECOMMEND", "STEAM"):
-        return None
-    # ── 校正（2026-07 數據）：蒸汽級(1.0-1.4)公眾錢勝率僅50%，必須ML同步才給建議
-    # ignore_sharp_filter=True 時跳過此過濾（供影子結算計算假設性結果，見 fetch_and_settle）
-    if grade == "STEAM" and not sharp and not ignore_sharp_filter:
-        return None
-    if d >= THRESHOLD_STEAM:   return f"OVER {total}"
-    if d <= -THRESHOLD_STEAM:  return f"UNDER {total}"
-    return None
+    return f"{direction} {total}"
 
 # ── Fetch Odds ────────────────────────────────────────────────────────────────
 async def fetch_and_store_odds(force: bool = False) -> dict:
@@ -298,6 +358,99 @@ async def fetch_and_store_odds(force: bool = False) -> dict:
         log.error(f"fetch_odds error: {e}")
         return {"error": str(e)}
 
+# ── 鎖定 Pick（v6.0 核心）─────────────────────────────────────────────────────
+def in_decision_window() -> bool:
+    et = et_now()
+    return (et.hour > DECISION_ET_HOUR) or (et.hour == DECISION_ET_HOUR and et.minute >= DECISION_ET_MIN)
+
+async def lock_picks(force: bool = False) -> dict:
+    """
+    在真實決策窗口（ET 10:35 / 台灣 22:35）鎖定 pick + 當下盤口。
+
+    為什麼要鎖：舊版結算拿 open_total（開盤價）對帳，但你看到信號時盤口早就跑掉了。
+    盤口 8.0→11.0，系統推 OVER 11.0 卻用 8.0 結算，等於用一個買不到的價在算勝率。
+    line_at_pick = 鎖定當下 Pinnacle 的盤口 = 你真正買得到的價。
+
+    鎖定後永不覆蓋（絕不能用後見之明修改當初的判斷）。
+    """
+    ts = utc_now()
+    if not force and not in_decision_window():
+        return {"skipped": "before_decision_window", "et_hour": et_now().hour}
+
+    today     = et_date_str(ts)
+    snaps_col = get_db()["snapshots"]
+    picks_col = get_db()["picks"]
+    docs      = await snaps_col.find({"date": today}).to_list(50)
+
+    locked = skipped = 0
+    for d in docs:
+        # 已鎖定 → 跳過（永不覆蓋）
+        if await picks_col.find_one({"game_id": d["game_id"], "date": today}):
+            skipped += 1
+            continue
+
+        snaps = pregame_snaps(d)
+        if len(snaps) < 2:
+            continue
+
+        try:
+            ct = datetime.fromisoformat(d["commence_time"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        mins_to_game = int((ct - ts).total_seconds() / 60)
+        if mins_to_game < MIN_MINUTES_TO_GAME:
+            continue  # 來不及下注，不列入紀錄（否則等於偷跑）
+
+        sig  = signal_from_snaps(snaps)
+        last = snaps[-1]
+        line = last.get("total")
+        if line is None:
+            continue
+
+        direction        = pick_direction(sig)                            # 正式 pick（含 sharp 過濾）
+        shadow_direction = pick_direction(sig, ignore_sharp_filter=True)  # 影子 pick（無過濾）
+        if not direction and not shadow_direction:
+            continue  # 無任何方向信號，不需要鎖
+
+        open_total = snaps[0].get("total")
+        await picks_col.insert_one({
+            "game_id":        d["game_id"],
+            "date":           today,
+            "home":           d["home"],
+            "away":           d["away"],
+            "commence_time":  d["commence_time"],
+            "locked_at":      ts,
+            "minutes_to_game": mins_to_game,
+
+            # ★ 對帳基準：鎖定當下的真實可下注盤口
+            "line_at_pick":   line,
+            "over_juice_at_pick":  last.get("over_juice"),
+            "under_juice_at_pick": last.get("under_juice"),
+            "ml_home_at_pick":     last.get("ml_home"),
+
+            "pick":           f"{direction} {line}"        if direction        else None,
+            "shadow_pick":    f"{shadow_direction} {line}" if shadow_direction else None,
+
+            # 鎖定當下的信號狀態（校正分桶用）
+            "open_total":     open_total,
+            "total_delta":    sig.get("delta", 0),
+            "ml_delta":       sig.get("ml_delta", 0),
+            "grade":          sig.get("grade", "FLAT"),
+            "sharp":          sig.get("sharp", False),
+            "ml_signal":      sig.get("ml", "FLAT"),
+            "snapshot_count": len(snaps),
+            # 這兩個加分至今從未被驗證過（舊版根本沒存進 history）→ 存下來讓校正能檢驗
+            "key_cross":      key_cross_count(open_total, line),
+            "one_way_ratio":  one_way_ratio(snaps),
+            # 盤口跑掉多少（= 舊版灌水幅度）
+            "line_drift":     round(line - open_total, 1) if open_total is not None else None,
+        })
+        locked += 1
+
+    if locked:
+        log.info(f"🔒 Locked {locked} picks @ {et_now().strftime('%H:%M ET')} (skipped {skipped} already-locked)")
+    return {"locked": locked, "already_locked": skipped}
+
 # ── Settle ────────────────────────────────────────────────────────────────────
 async def fetch_and_settle():
     if not ODDS_API_KEY: return
@@ -313,6 +466,7 @@ async def fetch_and_settle():
         yesterday  = et_date_str(ts - timedelta(days=1))
         snaps_col  = get_db()["snapshots"]
         hist_col   = get_db()["history"]
+        picks_col  = get_db()["picks"]
         settled = 0
 
         for s in scores:
@@ -337,24 +491,44 @@ async def fetch_and_settle():
                 game_doc = await snaps_col.find_one({"game_id": s["id"]})
             if not game_doc: continue
 
-            snaps  = pregame_snaps(game_doc)
-            sig    = signal_from_snaps(snaps)
-            pick   = pick_from_signal(sig, game_doc)
-            total  = (game_doc.get("open") or {}).get("total")
-            result = None
-            if pick and total:
-                if "OVER"  in pick: result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
-                if "UNDER" in pick: result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
+            snaps       = pregame_snaps(game_doc)
+            sig         = signal_from_snaps(snaps)
+            open_total  = (game_doc.get("open") or {}).get("total")
+            close_total = (snaps[-1].get("total") if snaps else None)
 
-            # ── 影子結算（2026-07-13 新增）─────────────────────────────
-            # 對「STEAM 且非銳錢」等被 sharp 過濾、不產生正式 pick 的方向信號，
-            # 仍算出假設性結果存入 history，供 /calibration 持續驗證過濾規則是否正確。
-            # 不影響 /stats、/model、/history、/corrections（那些仍只看正式 pick/result）。
-            shadow_pick   = pick_from_signal(sig, game_doc, ignore_sharp_filter=True)
-            shadow_result = None
-            if shadow_pick and total:
-                if "OVER"  in shadow_pick: shadow_result = "WIN" if total_runs > total else "LOSS" if total_runs < total else "PUSH"
-                if "UNDER" in shadow_pick: shadow_result = "WIN" if total_runs < total else "LOSS" if total_runs > total else "PUSH"
+            # ── 取回當初鎖定的 pick（v6.0 核心）────────────────────────────
+            # 有鎖定紀錄 → 用當初鎖定的 pick 與 line_at_pick 結算（誠實對帳）
+            # 無鎖定紀錄 → 這場在決策窗口沒有信號（或部署前的舊場次），不產生正式 result
+            lock = await picks_col.find_one({"game_id": s["id"]})
+
+            if lock:
+                pick          = lock.get("pick")
+                shadow_pick   = lock.get("shadow_pick")
+                line_at_pick  = lock.get("line_at_pick")
+                lock_delta    = lock.get("total_delta", 0)
+                lock_sharp    = lock.get("sharp", False)
+                lock_grade    = lock.get("grade", "FLAT")
+                lock_ml_delta = lock.get("ml_delta", 0)
+                lock_kx       = lock.get("key_cross")
+                lock_owr      = lock.get("one_way_ratio")
+                lock_drift    = lock.get("line_drift")
+            else:
+                pick = shadow_pick = line_at_pick = None
+                lock_delta    = sig.get("delta", 0)
+                lock_sharp    = sig.get("sharp", False)
+                lock_grade    = sig.get("grade", "FLAT")
+                lock_ml_delta = sig.get("ml_delta", 0)
+                lock_kx = lock_owr = lock_drift = None
+
+            # ★ 正式結算：一律對帳 line_at_pick（你真正買得到的價）
+            result        = ou_result(pick,        line_at_pick, total_runs)
+            shadow_result = ou_result(shadow_pick, line_at_pick, total_runs)
+
+            # 對照組（診斷用，不進 /calibration 的主分桶）：
+            # result_vs_open  = 舊版 v5 的算法（拿買不到的開盤價對帳）→ 灌水後的假勝率
+            # result_vs_close = 對帳收盤價 → 檢查是否只是在追平收盤價
+            result_vs_open  = ou_result(pick, open_total,  total_runs)
+            result_vs_close = ou_result(pick, close_total, total_runs)
 
             # ── ML 獨贏結算（2026-07-08 新增：之前獨贏推薦從未被結算）──────
             # 取各隊得分
@@ -383,18 +557,36 @@ async def fetch_and_settle():
                 "home":          game_doc["home"],
                 "away":          game_doc["away"],
                 "commence_time": game_doc["commence_time"],
-                "open_total":    total,
-                "close_total":   (game_doc.get("latest") or {}).get("total"),
-                "total_delta":   sig.get("delta", 0),
-                "ml_delta":      sig.get("ml_delta", 0),
+
+                # ★ v6.0：標記結算版本。/calibration 只信任 >= SETTLE_VERSION 的資料，
+                #   舊的（拿開盤價對帳的灌水資料）一律排除，不再污染參數調整。
+                "settle_version": SETTLE_VERSION,
+                "has_lock":       bool(lock),
+
+                "open_total":    open_total,
+                "close_total":   close_total,
+                "line_at_pick":  line_at_pick,   # ★ 對帳基準（可下注價）
+                "line_drift":    lock_drift,     # 盤口從開盤跑掉多少 = 舊版灌水幅度
+
+                "total_delta":   lock_delta,
+                "ml_delta":      lock_ml_delta,
                 "signal":        sig,
-                "grade":         sig.get("grade", "FLAT"),
-                "sharp":         sig.get("sharp", False),
+                "grade":         lock_grade,
+                "sharp":         lock_sharp,
+                # 這兩個加分至今從未被驗證 → 存下來讓 /calibration 檢驗
+                "key_cross":     lock_kx,
+                "one_way_ratio": lock_owr,
+
                 "pick":          pick,
                 "actual_total":  total_runs,
-                "result":        result,
-                "shadow_pick":   shadow_pick,      # 影子結算：忽略 sharp 過濾的假設 pick
-                "shadow_result": shadow_result,    # 影子結算：假設性 WIN/LOSS/PUSH（僅供 /calibration）
+                "result":        result,          # ★ 對帳 line_at_pick 的誠實結果
+                "shadow_pick":   shadow_pick,     # 影子：忽略 sharp 過濾的假設 pick
+                "shadow_result": shadow_result,   # 影子：假設性結果（僅供 /calibration）
+
+                # 診斷對照組（量化舊 bug 的灌水幅度）
+                "result_vs_open":  result_vs_open,   # 舊版 v5 算法的結果（灌水）
+                "result_vs_close": result_vs_close,  # 對帳收盤價的結果
+
                 "ml_pick":       ml_pick_team,   # 獨贏推薦隊伍
                 "ml_result":     ml_result,      # 獨贏結果 WIN/LOSS
                 "home_runs":     home_runs,
@@ -433,8 +625,11 @@ async def daily_model_correction():
 
         for days in [7, 14, 30]:
             cutoff = et_date_str(ts - timedelta(days=days))
+            # ★ v6.0：只統計對帳 line_at_pick 的誠實結算
             docs   = await hist_col.find(
-                {"date": {"$gte": cutoff}, "result": {"$in": ["WIN","LOSS","PUSH"]}}
+                {"date": {"$gte": cutoff},
+                 "settle_version": {"$gte": SETTLE_VERSION},
+                 "result": {"$in": ["WIN","LOSS","PUSH"]}}
             ).to_list(500)
 
             if not docs: continue
@@ -499,6 +694,8 @@ async def scheduler():
     while True:
         if is_active_hours():
             await fetch_and_store_odds()
+            # ★ 決策窗口一到就鎖定 pick + 當下盤口（idempotent，已鎖定的不會被覆蓋）
+            await lock_picks()
             await fetch_and_settle()
             # 每天 ET 06:00 之後第一次抓取時執行模型修正
             today = et_date_str()
@@ -523,16 +720,20 @@ async def lifespan(app: FastAPI):
         await db["snapshots"].create_index([("game_id",1),("date",1)], unique=True)
         await db["history"].create_index([("game_id",1),("date",1)],   unique=True)
         await db["model_stats"].create_index([("period_days",1)],       unique=True)
+        # v6.0：鎖定的 pick（每場只鎖一次，unique 防重複覆蓋）
+        await db["picks"].create_index([("game_id",1),("date",1)],      unique=True)
         log.info("✅ MongoDB connected")
     await fetch_and_store_odds(force=True)
+    await lock_picks()
     await fetch_and_settle()
     await daily_model_correction()
     asyncio.create_task(scheduler())
-    log.info(f"⏰ v5.1 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
+    log.info(f"⏰ v6.0 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
+    log.info(f"🔒 決策窗口 ET {DECISION_ET_HOUR:02d}:{DECISION_ET_MIN:02d}（台灣 22:35）鎖定 pick + line_at_pick")
     yield
     if client_db: client_db.close()
 
-app = FastAPI(title="MLB Pinnacle Tracker v5.1", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker v6.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET","POST","OPTIONS"], allow_headers=["*"])
 
@@ -541,19 +742,24 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 async def root():
     et = et_now()
     return {
-        "status": "ok", "version": "5.1",
+        "status": "ok", "version": "6.0",
         "et_time": et.strftime("%Y-%m-%d %H:%M ET"),
         "active":  is_active_hours(),
         "schedule": f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
         "last_fetch": _last_fetch_ts.isoformat() if _last_fetch_ts else None,
         "thresholds": {"recommend": THRESHOLD_RECOMMEND, "steam": THRESHOLD_STEAM, "watch": THRESHOLD_WATCH},
+        "decision_window": f"ET {DECISION_ET_HOUR:02d}:{DECISION_ET_MIN:02d}（台灣 22:35）鎖定 pick + line_at_pick",
+        "in_decision_window": in_decision_window(),
+        "settle_basis": "line_at_pick（鎖定當下的真實可下注盤口）",
+        "stats_policy": f"Wilson 95% 下界 > {BREAKEVEN_WR}% 且樣本 ≥ {MIN_SAMPLE_FOR_CLAIM} 才算有 edge",
     }
 
 @app.get("/refresh")
 async def manual_refresh():
     result = await fetch_and_store_odds(force=True)
+    lock   = await lock_picks()
     await fetch_and_settle()
-    return {"triggered": True, **result}
+    return {"triggered": True, "lock": lock, **result}
 
 @app.get("/games")
 async def get_games():
@@ -764,8 +970,12 @@ async def get_stats():
 
     async def period_stats(days: int):
         cutoff = et_date_str(ts - timedelta(days=days))
+        # ★ v6.0：只統計誠實資料（對帳 line_at_pick）。
+        #   舊資料拿開盤價對帳，勝率被灌水，混進來會讓看板繼續顯示假的 75%。
         docs   = await hist_col.find(
-            {"date": {"$gte": cutoff}, "result": {"$in": ["WIN","LOSS","PUSH"]}}
+            {"date": {"$gte": cutoff},
+             "settle_version": {"$gte": SETTLE_VERSION},
+             "result": {"$in": ["WIN","LOSS","PUSH"]}}
         ).to_list(500)
         wins   = sum(1 for d in docs if d.get("result")=="WIN")
         losses = sum(1 for d in docs if d.get("result")=="LOSS")
@@ -777,9 +987,13 @@ async def get_stats():
         rec    = [d for d in docs if abs(d.get("total_delta",0)) >= THRESHOLD_RECOMMEND]
         rw     = sum(1 for d in rec if d.get("result")=="WIN")
         rl     = sum(1 for d in rec if d.get("result")=="LOSS")
+        lo, hi = wilson_interval(wins, total)
         return {
             "wins": wins, "losses": losses, "pushes": pushes, "total": total+pushes,
             "win_rate":    round(wins/total*100,1) if total>0 else 0,
+            # 真實勝率的 95% 區間。樣本小的時候原始勝率毫無意義，看這個。
+            "ci95":        [lo, hi],
+            "proven_edge": bool(lo is not None and total >= MIN_SAMPLE_FOR_CLAIM and lo > BREAKEVEN_WR),
             "roi":         round((wins*0.909-losses)/total*100,1) if total>0 else 0,
             "sharp_wins":  sw, "sharp_losses": sl,
             "sharp_wr":    round(sw/(sw+sl)*100,1) if (sw+sl)>0 else 0,
@@ -812,20 +1026,22 @@ async def get_stats():
 @app.get("/summary")
 async def get_summary():
     """
-    今日推薦總結
-    台灣時間 22:35 後（ET 10:35 AM）最準確：
-    - 下午場距開賽約 2.5 小時（最佳窗口）
-    - 快照累積較多，移動趨勢更可靠
-    篩選：蒸汽強度 ≥ 5 + 有推算方向 + 快照 ≥ 3 筆
-    邊緣蒸汽（1.0–1.1）且無 ML 同步 → 降為觀察，不推薦
+    今日推薦總結（v6.0）
+    台灣時間 22:35 = ET 10:35 = 決策窗口。此刻 pick + 當下盤口會被鎖定（line_at_pick），
+    結算一律對帳 line_at_pick，確保「看到的價 = 記錄的價 = 結算的價」。
+
+    ⚠ 舊版所有勝率宣稱（3.0+ 81%、OVER 89%、銳錢 75%）皆由結算 bug 灌水而來，
+      已全數下修。目前權重視為未驗證的先驗，等 ≥20 場誠實樣本再談調整。
     """
     today    = et_date_str()
     ts_now   = utc_now()
     et_time  = et_now()
-    et_hour  = et_time.hour
-    et_min   = et_time.minute
-    # 台灣時間 22:35 = ET 10:35 AM
-    taiwan_ready = (et_hour > 10) or (et_hour == 10 and et_min >= 35)
+    taiwan_ready = in_decision_window()
+
+    # 進入決策窗口 → 順手鎖定（idempotent，已鎖的不覆蓋）
+    # 保證使用者「看到的那個盤口」就是之後結算對帳的盤口。
+    if taiwan_ready:
+        await lock_picks()
 
     docs     = await get_db()["snapshots"].find({"date": today}).sort("commence_time",1).to_list(50)
 
@@ -854,14 +1070,16 @@ async def get_summary():
         if mins_to_game < 20:
             continue
 
-        # ── 蒸汽強度計算（2026-07 校正版）──────────────────────────
-        # 校正依據近30天數據：3.0+ 勝率81% · 銳錢75% vs 公眾25% · OVER 89% vs UNDER 61%
+        # ── 蒸汽強度計算（v6.0 誠實化版）──────────────────────────
+        # ⚠ 舊版的 base/bonus 是拿「灌水勝率」調出來的（3.0+ 宣稱 81%、OVER 宣稱 89%），
+        #   那些數字幾乎全來自「拿買不到的開盤價對帳」這個 bug。已全部下修。
+        #   目前所有權重視為「未經驗證的先驗」，等 /calibration 累積 ≥20 場誠實樣本再談調整。
         a = abs(td)
         base = 0
-        if a >= 3.0:      base = 9   # 極強（81.2% 勝率實證）
-        elif a >= 2.0:    base = 8
-        elif a >= 1.5:    base = 7
-        elif a >= 1.0:    base = 4   # 蒸汽級降為4（50% 勝率，需靠加分才能進推薦）
+        if a >= 3.0:      base = 7   # 舊版 9 →（宣稱的 85% 勝率是灌水產物，不再重押）
+        elif a >= 2.0:    base = 6   # 舊版 8
+        elif a >= 1.5:    base = 5   # 舊版 7
+        elif a >= 1.0:    base = 4
         elif a >= 0.5:    base = 3
         else:
             jd = abs(sig.get("juice_delta", 0))
@@ -869,22 +1087,28 @@ async def get_summary():
             else:        base = 1
 
         bonus = 0
-        if ml_sig != "FLAT":              bonus += 1.5  # 銳錢確認（75% vs 25%，加分提高）
-        if td > 0:                        bonus += 0.5  # OVER 方向（88.9% 勝率實證）
+        # ML 同步（銳錢）：舊版 +1.5（依據灌水的 75% vs 25%）→ 下修為 +1.0
+        if ml_sig != "FLAT":              bonus += 1.0
+        # ⚠ 已移除：OVER 方向 +0.5
+        #   理由 1：「OVER 88.9% 勝率」是灌水產物（OVER 信號多為大幅上移，灌水最嚴重）
+        #   理由 2：歷史 10 場 OVER 全部同時是銳錢 → 與 ML 同步加分完全重複計算
         if len(snaps) >= 5:               bonus += 0.5
         if 120 <= mins_to_game <= 480:    bonus += 0.5
-        if grade == "RECOMMEND" and ml_sig != "FLAT": bonus += 1
+        # 舊版 RECOMMEND + ML 再加 1（與上面 ML 加分疊加）→ 下修為 0.5，避免重複計分
+        if grade == "RECOMMEND" and ml_sig != "FLAT": bonus += 0.5
 
-        # ── 信號品質增強（2026-07 新增）─────────────────────────────
+        # ── 信號品質（⚠ 從未被驗證：舊版根本沒把這兩個值存進 history）────
+        # v6.0 起會存入 history 並在 /calibration 分桶。在拿到 ≥20 場誠實樣本前，
+        # 權重先減半，避免用一個沒人檢查過的指標去左右下注決策。
         open_t  = snaps[0].get("total") if snaps else None
         close_t = snaps[-1].get("total") if snaps else None
         kx      = key_cross_count(open_t, close_t)   # 關鍵數字穿越
         owr     = one_way_ratio(snaps)               # 單向移動比率
-        if kx >= 2:   bonus += 1.0   # 穿越兩個以上關鍵數字 = 莊家大幅重估
-        elif kx == 1: bonus += 0.5   # 穿越一個關鍵數字
+        if kx >= 2:   bonus += 0.5   # 舊版 +1.0
+        elif kx == 1: bonus += 0.25  # 舊版 +0.5
         if abs(td) >= 1.0:
-            if owr >= 0.9:   bonus += 0.5   # 單向推進，資金方向一致
-            elif owr < 0.6:  bonus -= 1.0   # 來回震盪，多空拉鋸不可靠
+            if owr >= 0.9:   bonus += 0.25  # 舊版 +0.5
+            elif owr < 0.6:  bonus -= 0.5   # 舊版 -1.0
 
         # 停滯判斷
         settled = False
@@ -900,10 +1124,11 @@ async def get_summary():
 
         steam_score = min(round(base + bonus, 1), 10)
 
-        # ── 公眾錢過濾（校正核心：公眾錢勝率僅25%）─────────────────
-        # 所有蒸汽級信號（1.0-1.4）無 ML 同步 → 降為觀察
+        # ── 公眾錢過濾 ─────────────────────────────────────────────
+        # ⚠ 舊版註解宣稱「公眾錢勝率僅25%」——那是 4 場樣本 + 灌水結算的產物，
+        #   統計上毫無意義（4 場 2 勝的 95% 區間是 15%~85%）。
+        #   過濾規則保留（保守方向），但不再對使用者謊報一個假的勝率數字。
         edge_steam = (grade == "STEAM") and ml_sig == "FLAT"
-        # 小分+公眾錢 = 最弱組合（25% 勝率），推薦級也要警告
         weak_combo = (td < 0) and ml_sig == "FLAT"
         if edge_steam:
             steam_score = max(steam_score - 2.0, 2.0)
@@ -914,9 +1139,9 @@ async def get_summary():
         # 加入警告標記
         warnings = []
         if edge_steam:
-            warnings.append("蒸汽級但ML未同步（公眾錢勝率僅25%），已降為觀察")
+            warnings.append("蒸汽級(1.0–1.4)但ML未同步，已降為觀察（樣本不足，尚無法證實此類信號有效）")
         elif weak_combo and pick:
-            warnings.append("小分+ML未同步為歷史最弱組合（25%勝率），建議略過或減注")
+            warnings.append("小分+ML未同步，過往樣本偏弱但數量不足以下定論，建議減注")
         if not settled and steam_score >= 5:
             warnings.append("盤口仍在移動，建議等停滯後再確認")
         if abs(td) >= 1.0 and owr < 0.6:
@@ -1015,37 +1240,61 @@ async def get_calibration():
     """
     ts       = utc_now()
     cutoff   = et_date_str(ts - timedelta(days=30))
-    # 納入影子結算（shadow_*）：讓被 sharp 過濾、無正式 pick 的方向信號
-    # （尤其 1.0–1.4 公眾錢）也能被校正分析看見。
-    # 舊資料沒有 shadow_* 時，自動回退到正式的 result / pick。
-    docs     = await get_db()["history"].find(
-        {"date": {"$gte": cutoff},
-         "$or": [{"shadow_result": {"$in": ["WIN","LOSS"]}},
-                 {"result":        {"$in": ["WIN","LOSS"]}}]}
-    ).to_list(500)
 
-    def cal_result(d): return d.get("shadow_result") or d.get("result")
-    def cal_pick(d):   return d.get("shadow_pick")   or d.get("pick") or ""
+    # ── 只信任誠實資料（v6.0）──────────────────────────────────────────────
+    # settle_version >= 6 且有 line_at_pick = 對帳「真正買得到的盤口」的結算。
+    # v5 以前的資料拿開盤價對帳，勝率被系統性灌水（且灌水量與 delta 成正比），
+    # 拿它調參數等於把 bug 固化進模型 → 一律排除。
+    q_honest = {
+        "date": {"$gte": cutoff},
+        "settle_version": {"$gte": SETTLE_VERSION},
+        "line_at_pick": {"$ne": None},
+        "$or": [{"result":        {"$in": ["WIN", "LOSS"]}},
+                {"shadow_result": {"$in": ["WIN", "LOSS"]}}],
+    }
+    docs = await get_db()["history"].find(q_honest).to_list(500)
+
+    # 被排除的舊灌水資料有多少（讓你知道為什麼樣本突然變小）
+    legacy_excluded = await get_db()["history"].count_documents({
+        "date": {"$gte": cutoff},
+        "result": {"$in": ["WIN", "LOSS"]},
+        "$or": [{"settle_version": {"$exists": False}},
+                {"settle_version": {"$lt": SETTLE_VERSION}}],
+    })
+
+    # 分析時把影子 pick 一併納入（讓被 sharp 過濾掉的信號也能被檢驗）
+    def cal_result(d): return d.get("result") or d.get("shadow_result")
+    def cal_pick(d):   return d.get("pick")   or d.get("shadow_pick") or ""
 
     def bucket_stats(items):
-        w = sum(1 for d in items if cal_result(d)=="WIN")
-        l = sum(1 for d in items if cal_result(d)=="LOSS")
+        w = sum(1 for d in items if cal_result(d) == "WIN")
+        l = sum(1 for d in items if cal_result(d) == "LOSS")
         t = w + l
-        return {"wins": w, "losses": l, "total": t,
-                "win_rate": round(w/t*100,1) if t>0 else None,
-                "roi": round((w*0.909-l)/t*100,1) if t>0 else None}
+        lo, hi = wilson_interval(w, t)
+        # 只有「95% 信賴下界 > 損益平衡點」才算真的證明有 edge
+        proven = (lo is not None and t >= MIN_SAMPLE_FOR_CLAIM and lo > BREAKEVEN_WR)
+        refuted = (hi is not None and t >= MIN_SAMPLE_FOR_CLAIM and hi < BREAKEVEN_WR)
+        return {
+            "wins": w, "losses": l, "total": t,
+            "win_rate": round(w / t * 100, 1) if t > 0 else None,
+            "roi":      round((w * 0.909 - l) / t * 100, 1) if t > 0 else None,
+            "ci95":     [lo, hi],                      # 真實勝率的 95% 區間
+            "verdict":  ("有效" if proven else
+                         "無效" if refuted else
+                         "樣本不足" if t < MIN_SAMPLE_FOR_CLAIM else "無定論"),
+        }
 
     # ── 分桶1：移動幅度 ──
     by_delta = {
-        "1.0-1.4 蒸汽":   bucket_stats([d for d in docs if 1.0<=abs(d.get("total_delta",0))<1.5]),
-        "1.5-1.9 推薦":   bucket_stats([d for d in docs if 1.5<=abs(d.get("total_delta",0))<2.0]),
-        "2.0-2.9 強推薦": bucket_stats([d for d in docs if 2.0<=abs(d.get("total_delta",0))<3.0]),
-        "3.0+ 極強":     bucket_stats([d for d in docs if abs(d.get("total_delta",0))>=3.0]),
+        "1.0-1.4 蒸汽":   bucket_stats([d for d in docs if 1.0 <= abs(d.get("total_delta", 0)) < 1.5]),
+        "1.5-1.9 推薦":   bucket_stats([d for d in docs if 1.5 <= abs(d.get("total_delta", 0)) < 2.0]),
+        "2.0-2.9 強推薦": bucket_stats([d for d in docs if 2.0 <= abs(d.get("total_delta", 0)) < 3.0]),
+        "3.0+ 極強":      bucket_stats([d for d in docs if abs(d.get("total_delta", 0)) >= 3.0]),
     }
 
     # ── 分桶2：銳錢 vs 公眾錢 ──
     by_money = {
-        "銳錢(ML同步)":  bucket_stats([d for d in docs if d.get("sharp")]),
+        "銳錢(ML同步)":     bucket_stats([d for d in docs if d.get("sharp")]),
         "公眾錢(ML未同步)": bucket_stats([d for d in docs if not d.get("sharp")]),
     }
 
@@ -1055,43 +1304,139 @@ async def get_calibration():
         "UNDER 小分": bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER")]),
     }
 
-    # ── 分桶4：移動方向 × 結果的交叉 ──
+    # ── 分桶4：方向 × 銳錢交叉 ──
     by_cross = {
-        "大分+銳錢":  bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")  and d.get("sharp")]),
-        "大分+公眾":  bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")  and not d.get("sharp")]),
-        "小分+銳錢":  bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER") and d.get("sharp")]),
-        "小分+公眾":  bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER") and not d.get("sharp")]),
+        "大分+銳錢": bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")  and d.get("sharp")]),
+        "大分+公眾": bucket_stats([d for d in docs if cal_pick(d).startswith("OVER")  and not d.get("sharp")]),
+        "小分+銳錢": bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER") and d.get("sharp")]),
+        "小分+公眾": bucket_stats([d for d in docs if cal_pick(d).startswith("UNDER") and not d.get("sharp")]),
     }
 
-    # ── 自動建議 ──
-    suggestions = []
-    for name, stats in {**by_delta, **by_money, **by_direction, **by_cross}.items():
-        if stats["total"] and stats["total"] >= 5:
-            if stats["win_rate"] is not None and stats["win_rate"] < 45:
-                suggestions.append(f"⚠ 「{name}」勝率僅 {stats['win_rate']}%（{stats['total']}場），建議降級或過濾此類信號")
-            elif stats["win_rate"] is not None and stats["win_rate"] >= 65:
-                suggestions.append(f"✅ 「{name}」勝率 {stats['win_rate']}%（{stats['total']}場），可提高此類信號權重")
-    if not suggestions:
-        suggestions.append("樣本尚不足以做出調整建議（各桶需 ≥5 場），繼續累積數據")
+    # ── 分桶5＋6：從未被驗證過的兩個加分（v6.0 首次可檢驗）──────────────
+    kx_docs = [d for d in docs if d.get("key_cross") is not None]
+    by_key_cross = {
+        "穿越0個關鍵數字":  bucket_stats([d for d in kx_docs if d.get("key_cross") == 0]),
+        "穿越1個關鍵數字":  bucket_stats([d for d in kx_docs if d.get("key_cross") == 1]),
+        "穿越2+個關鍵數字": bucket_stats([d for d in kx_docs if d.get("key_cross", 0) >= 2]),
+    }
+    owr_docs = [d for d in docs if d.get("one_way_ratio") is not None]
+    by_one_way = {
+        "單向率 ≥0.9（單向推進）": bucket_stats([d for d in owr_docs if d.get("one_way_ratio", 0) >= 0.9]),
+        "單向率 0.6–0.89":         bucket_stats([d for d in owr_docs if 0.6 <= d.get("one_way_ratio", 0) < 0.9]),
+        "單向率 <0.6（來回震盪）": bucket_stats([d for d in owr_docs if d.get("one_way_ratio", 1) < 0.6]),
+    }
 
-    # 因影子結算而新增可見（過去被 sharp 過濾、正式 result 為空）的場數
-    shadow_only = sum(
-        1 for d in docs
-        if d.get("shadow_result") in ("WIN", "LOSS")
-        and d.get("result") not in ("WIN", "LOSS")
-    )
+    # ── 灌水診斷：同一批 pick，三種對帳基準的勝率差距 ─────────────────────
+    # 這直接量化舊 bug 造成的假優勢：vs_open 是舊版算法，at_pick 是真實可下注價。
+    def wr_of(field):
+        w = sum(1 for d in docs if d.get(field) == "WIN")
+        l = sum(1 for d in docs if d.get(field) == "LOSS")
+        t = w + l
+        return {"wins": w, "losses": l, "total": t,
+                "win_rate": round(w / t * 100, 1) if t > 0 else None}
+
+    drifts = [abs(d["line_drift"]) for d in docs if d.get("line_drift") is not None]
+    inflation_check = {
+        "說明": "同一批 pick 用三種盤口對帳。vs_open = 舊版 v5 的算法（買不到的價），"
+                "at_pick = 你真正買得到的價。兩者差距 = 舊版勝率灌水幅度。",
+        "對帳 line_at_pick（真實·現行）": wr_of("result"),
+        "對帳 open_total（舊版·灌水）":   wr_of("result_vs_open"),
+        "對帳 close_total（收盤價）":     wr_of("result_vs_close"),
+        "平均盤口漂移":  round(sum(drifts) / len(drifts), 2) if drifts else None,
+    }
+
+    # ── 建議引擎（v6.0：Wilson 下界 vs 損益平衡點，最低 20 場）────────────
+    suggestions = []
+    all_buckets = {**by_delta, **by_money, **by_direction, **by_cross,
+                   **by_key_cross, **by_one_way}
+    for name, st in all_buckets.items():
+        t, lo, hi = st["total"], st["ci95"][0], st["ci95"][1]
+        if t == 0:
+            continue
+        if t < MIN_SAMPLE_FOR_CLAIM:
+            suggestions.append(
+                f"⏳「{name}」{t} 場（勝率 {st['win_rate']}%，真實區間 {lo}%–{hi}%）"
+                f"— 樣本 <{MIN_SAMPLE_FOR_CLAIM}，區間太寬，不做任何調整"
+            )
+        elif st["verdict"] == "有效":
+            suggestions.append(
+                f"✅「{name}」{t} 場，勝率下界 {lo}% > 損益平衡 {BREAKEVEN_WR}% "
+                f"— 統計上證實有 edge，可考慮提高權重"
+            )
+        elif st["verdict"] == "無效":
+            suggestions.append(
+                f"❌「{name}」{t} 場，勝率上界 {hi}% < 損益平衡 {BREAKEVEN_WR}% "
+                f"— 統計上證實無利可圖，應過濾"
+            )
+        else:
+            suggestions.append(
+                f"➖「{name}」{t} 場，區間 {lo}%–{hi}% 橫跨損益平衡 {BREAKEVEN_WR}% "
+                f"— 無定論，維持現狀"
+            )
+
+    warnings = [
+        f"⚠ 已排除 {legacy_excluded} 筆 v5 以前的結算資料（拿開盤價對帳，勝率被系統性灌水）。"
+        f"樣本會從 v6.0 部署日重新累積。",
+        f"⚠ 判定標準：Wilson 95% 信賴下界 > {BREAKEVEN_WR}%（-110 損益平衡點）才算有 edge，"
+        f"且至少 {MIN_SAMPLE_FOR_CLAIM} 場。原始勝率高不代表有 edge。",
+        "⚠ 30天滾動視窗每週重疊 29 天 —— 每週在幾乎同一批資料上重新調參 = 過擬合複利。"
+        "建議每月調一次，或改用不重疊的區間比較。",
+        "⚠ 同時檢驗多個分桶會放大偽陽性（跑 18 個桶，即使全無 edge 也預期約 1 個會「顯著」）。"
+        "單一分桶亮綠燈不足以行動，要看它是否跨期穩定重現。",
+    ]
+    if inflation_check["對帳 line_at_pick（真實·現行）"]["total"] == 0:
+        warnings.insert(0, "🔎 目前尚無 v6.0 誠實樣本（需等新的比賽在決策窗口鎖定並結算）。"
+                           "本報告的分桶全為空是預期行為，不是故障。")
 
     return {
-        "period":                 "近30天",
-        "sample_size":            len(docs),
-        "newly_visible_filtered": shadow_only,   # 影子結算後多看見的被過濾場數
-        "by_delta":               by_delta,
-        "by_money":               by_money,
-        "by_direction":           by_direction,
-        "by_cross":               by_cross,
-        "suggestions":            suggestions,
-        "generated_at":           ts.isoformat(),
+        "period":            "近30天",
+        "sample_size":       len(docs),
+        "legacy_excluded":   legacy_excluded,
+        "settle_version":    SETTLE_VERSION,
+        "breakeven_wr":      BREAKEVEN_WR,
+        "min_sample":        MIN_SAMPLE_FOR_CLAIM,
+        "inflation_check":   inflation_check,
+        "by_delta":          by_delta,
+        "by_money":          by_money,
+        "by_direction":      by_direction,
+        "by_cross":          by_cross,
+        "by_key_cross":      by_key_cross,   # ⚠ 此加分過去從未被驗證
+        "by_one_way":        by_one_way,     # ⚠ 此加分過去從未被驗證
+        "suggestions":       suggestions,
+        "warnings":          warnings,
+        "generated_at":      ts.isoformat(),
     }
+
+
+@app.get("/picks")
+async def get_picks():
+    """
+    查看已鎖定的 pick（v6.0）。
+    line_at_pick = 鎖定當下的真實可下注盤口 = 結算對帳基準。
+    鎖定後永不覆蓋 —— 不能用後見之明修改當初的判斷。
+    """
+    ts     = utc_now()
+    cutoff = et_date_str(ts - timedelta(days=7))
+    docs   = await get_db()["picks"].find(
+        {"date": {"$gte": cutoff}}
+    ).sort("locked_at", -1).to_list(100)
+    return [{
+        "game_id":       d["game_id"],
+        "date":          d["date"],
+        "matchup":       f"{d.get('away')} @ {d.get('home')}",
+        "locked_at":     d["locked_at"].isoformat() if isinstance(d.get("locked_at"), datetime) else None,
+        "minutes_to_game": d.get("minutes_to_game"),
+        "pick":          d.get("pick"),
+        "shadow_pick":   d.get("shadow_pick"),
+        "line_at_pick":  d.get("line_at_pick"),
+        "open_total":    d.get("open_total"),
+        "line_drift":    d.get("line_drift"),
+        "total_delta":   d.get("total_delta"),
+        "grade":         d.get("grade"),
+        "sharp":         d.get("sharp"),
+        "key_cross":     d.get("key_cross"),
+        "one_way_ratio": d.get("one_way_ratio"),
+    } for d in docs]
 
 
 if __name__ == "__main__":
