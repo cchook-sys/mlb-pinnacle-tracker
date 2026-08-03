@@ -313,7 +313,7 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 .db-steam::before{background:linear-gradient(90deg,var(--orange),var(--yellow));}
 .db-ml::before{background:linear-gradient(90deg,var(--purple),var(--blue));}
 .db-label{font-size:8px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
-.db-main{font-size:20px;font-weight:900;margin-bottom:4px;line-height:1.2;}
+.db-main{font-size:26px;font-weight:900;margin-bottom:4px;line-height:1.2;}
 .db-sub{font-size:11px;opacity:.7;line-height:1.5;}
 .db-status{display:inline-flex;align-items:center;gap:5px;margin-top:8px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;}
 
@@ -419,6 +419,7 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
       <button class="fchip rec"   id="f-rec"    onclick="setFilter('rec')">⚡ 推薦</button>
       <button class="fchip steam" id="f-steam"  onclick="setFilter('steam')">🔥 蒸汽</button>
       <button class="fchip ml"    id="f-ml"     onclick="setFilter('ml')">🦈 獨贏</button>
+      <button class="fchip" id="f-near6h" onclick="toggleNear6h()" title="只顯示開賽6小時內的場次">⏱ 6hr內</button>
       <div style="margin-left:auto;display:flex;gap:4px;">
         <button class="fchip" id="f-sort" onclick="toggleSort()" title="按移動幅度排序">🔥 排序</button>
         <button class="fchip" id="f-compact" onclick="toggleCompact()" title="緊湊模式">▤</button>
@@ -546,6 +547,7 @@ html,body{height:100%;background:#0d1117;color:#cdd9e5;font-family:-apple-system
 const API='https://mlb-pinnacle-tracker.onrender.com';
 let games=[],selId=null,chartObj=null,corrOpen=false,isMobile=window.innerWidth<=768;
 let currentFilter='all';
+let near6hOnly=false;
 let sortByDelta=false;
 let compactMode=false;
 let soundEnabled=false;
@@ -614,15 +616,25 @@ function drawChart(snaps, hours){
     new Date(s2.ts).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'})
   );
 
+  // 逐點標記「蒸汽變動」：單步移動 ≥0.5 視為蒸汽級跳動，用紅點+放大強調
+  // （只標記客觀可見的移動幅度，不標記 RLM/Sharp——那些需要逐點的資金流向資料，
+  //  目前系統沒有存，不能亂標一個看起來很準但其實是編的事件）
+  const stepIsSteam=filtered.map((s2,i)=>{
+    if(i===0||s2.total==null||filtered[i-1].total==null) return false;
+    return Math.abs(s2.total-filtered[i-1].total)>=0.5;
+  });
+  const ouColors=filtered.map((_,i)=>stepIsSteam[i]?'#ff7b72':'#38bdf8');
+  const ouRadii =filtered.map((_,i)=>stepIsSteam[i]?(filtered.length>20?4:7):(filtered.length>20?2:4));
+
   chartObj=new Chart(cv,{
     data:{labels,datasets:[
       {type:'line',label:'大小分 (O/U)',
        // 四捨五入到小數點後1位，避免浮點數精度問題
        data:filtered.map(s2=>s2.total!=null?Math.round(s2.total*10)/10:null),
        borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.07)',
-       borderWidth:2.5,pointRadius:filtered.length>20?2:4,pointHoverRadius:7,
-       pointBackgroundColor:'#38bdf8',pointHoverBackgroundColor:'#fff',
-       pointHoverBorderColor:'#38bdf8',pointHoverBorderWidth:2,
+       borderWidth:2.5,pointRadius:ouRadii,pointHoverRadius:8,
+       pointBackgroundColor:ouColors,pointHoverBackgroundColor:'#fff',
+       pointHoverBorderColor:ouColors,pointHoverBorderWidth:2,
        tension:.2,fill:true,yAxisID:'y'},
       {type:'line',label:'主隊獨贏 (ML)',data:filtered.map(s2=>s2.ml_home),
        borderColor:'#fbbf24',backgroundColor:'transparent',
@@ -798,7 +810,15 @@ function setFilter(f){
   renderList();
 }
 
-function passFilter(s, e){
+function toggleNear6h(){
+  near6hOnly=!near6hOnly;
+  const btn=document.getElementById('f-near6h');
+  if(btn) btn.classList.toggle('active', near6hOnly);
+  renderList();
+}
+
+function passFilter(s, e, mins){
+  if(near6hOnly && !(mins!=null && mins>=0 && mins<=360)) return false;
   if(currentFilter==='all')   return true;
   if(currentFilter==='rec')   return s.rec;
   if(currentFilter==='steam') return s.st&&!s.rec;
@@ -819,27 +839,31 @@ function timeToGame(mins){
 // ── STEAM SCORE 1–10（2026-07 校正版）────────────────────────────────────────
 // 校正依據近30天實證：3.0+ 勝率81% · 銳錢75% vs 公眾25% · OVER 89% vs UNDER 61%
 function steamScore(s, snaps, mins){
+  // ── v6.0（2026-07）誠實化同步 ──────────────────────────────────────
+  // 這裡曾經跟後端使用不同的權重（81.2%/88.9%/75% 那些「實證」數字），
+  // 但那些勝率是結算 bug（拿買不到的開盤價對帳）灌水出來的假數字，後端
+  // 兩週前已經下修。這裡同步成一樣的權重，否則前後端會顯示矛盾的分數。
   const a=Math.abs(s.d);
   const jd=Math.abs(s.juiceDelta||0);
 
   let base=0;
-  if(a>=3.0)      base=9;  // 極強（81.2% 實證）
-  else if(a>=2.0) base=8;
-  else if(a>=1.5) base=7;
-  else if(a>=1.0) base=4;  // 蒸汽級降為4（50% 勝率）
+  if(a>=3.0)      base=7;  // 舊版 9（宣稱81%勝率是灌水產物）
+  else if(a>=2.0) base=6;  // 舊版 8
+  else if(a>=1.5) base=5;  // 舊版 7
+  else if(a>=1.0) base=4;
   else if(a>=0.5) base=3;
   else if(jd>=10) base=2;
   else            base=1;
 
   let bonus=0;
-  if(s.mlSig!=='FLAT')            bonus+=1.5; // 銳錢確認（75% vs 25%）
-  if(s.d>0)                       bonus+=0.5; // OVER 方向（88.9% 實證）
+  if(s.mlSig!=='FLAT')            bonus+=1.0; // 舊版 1.5（75% vs 25% 是灌水）
+  // 已移除：OVER 方向 +0.5 —— 舊版「88.9% 實證」是灌水產物，
+  // 且歷史 OVER 場次幾乎全部同時是銳錢，跟上面 ML 加分重複計算
   if(snaps.length>=5)             bonus+=0.5;
   if(mins>=120&&mins<=480)        bonus+=0.5;
-  if(s.rec&&s.mlSig!=='FLAT')     bonus+=1;
+  if(s.rec&&s.mlSig!=='FLAT')     bonus+=0.5; // 舊版 +1（與ML加分重複，下修避免疊加）
 
-  // ── 信號品質增強（2026-07）──────────────────────────
-  // 關鍵數字穿越：MLB 結果集中在 7–9.5，穿越 = 莊家大幅重估
+  // ── 信號品質增強（⚠ 從未被驗證，權重先減半，等 /calibration 有 ≥20 場再談）──
   const KEYS=[7.0,7.5,8.0,8.5,9.0,9.5];
   const openT=snaps.length?snaps[0].total:null;
   const closeT=snaps.length?snaps[snaps.length-1].total:null;
@@ -848,9 +872,8 @@ function steamScore(s, snaps, mins){
     const lo=Math.min(openT,closeT),hi=Math.max(openT,closeT);
     kx=KEYS.filter(k=>lo<k&&k<hi).length;
   }
-  if(kx>=2)      bonus+=1.0;
-  else if(kx===1)bonus+=0.5;
-  // 單向移動比率：1.0=單向推進（強）、<0.6=震盪（扣分）
+  if(kx>=2)      bonus+=0.5;  // 舊版 1.0
+  else if(kx===1)bonus+=0.25; // 舊版 0.5
   let owr=1.0;
   const tvals=snaps.map(x=>x.total).filter(v=>v!=null);
   if(tvals.length>=3){
@@ -860,8 +883,8 @@ function steamScore(s, snaps, mins){
     owr=path>0?Math.round(net/path*100)/100:1.0;
   }
   if(a>=1.0){
-    if(owr>=0.9)     bonus+=0.5;
-    else if(owr<0.6) bonus-=1.0;
+    if(owr>=0.9)     bonus+=0.25; // 舊版 0.5
+    else if(owr<0.6) bonus-=0.5;  // 舊版 1.0
   }
 
   let settled=false;
@@ -875,6 +898,7 @@ function steamScore(s, snaps, mins){
   }
 
   // 公眾錢過濾：蒸汽級（1.0-1.4）無 ML 同步 → 大幅降分
+  // （過濾規則保留，但不再宣稱一個未經統計驗證的勝率數字）
   const edgeSteam=(a>=1.0&&a<1.5)&&s.mlSig==='FLAT';
   let score=Math.min(Math.round((base+bonus)*10)/10, 10);
   if(edgeSteam) score=Math.max(score-2.0, 2.0);
@@ -1268,8 +1292,9 @@ function renderList(){
   const filtered=games.filter(g=>{
     const snaps=(g.history||[]).filter(s=>s.total!=null);
     const s=calcSig(snaps,g.ml_hint,g.signal);
-    const e=calcEnt(snaps,mu(g.commence_time),s,g);
-    return passFilter(s,e);
+    const mins=mu(g.commence_time);
+    const e=calcEnt(snaps,mins,s,g);
+    return passFilter(s,e,mins);
   });
 
   // Sort by delta magnitude if enabled
@@ -1504,16 +1529,24 @@ function renderDetail(g){
   const reason=entryReason(s,e,g,snaps,mins);
 
   // ── Decision Box（最醒目的決策區，置頂）─────────────────────────────────
+  // v6.0：這個區塊過去只是算出來、從未被插進頁面（dead code）——
+  // 也就是「應該最顯眼的東西」實際上根本沒有顯示過。這是修這次 UX 問題的核心。
   let conclusionHtml='';
+  const snapBar=(n,max=6)=>{
+    const filled=Math.min(n,max);
+    return `<span style="font-family:monospace;letter-spacing:1px;color:${n<3?'#374151':'#545d68'};">${'■'.repeat(filled)}${'□'.repeat(max-filled)}</span>`;
+  };
   const noSigHtml=`
-    <div style="background:#0b1220;border:1px solid #1b2a41;border-radius:8px;padding:14px 16px;margin-bottom:14px;text-align:center;">
-      <div style="font-size:24px;margin-bottom:6px;">─</div>
-      <div style="font-size:16px;font-weight:900;color:#374151;">盤口穩定，不建議進場</div>
+    <div style="background:#0b1220;border:1px solid #1b2a41;border-radius:8px;padding:14px 16px;margin-bottom:14px;text-align:center;
+      ${!s.snapOk?'opacity:.55;':''}">
+      <div style="font-size:24px;margin-bottom:6px;color:#374151;">${!s.snapOk?'○':'─'}</div>
+      <div style="font-size:16px;font-weight:900;color:#374151;">${!s.snapOk?'資料不足，尚無法判斷':'盤口穩定，不建議進場'}</div>
       <div style="font-size:11px;color:#374151;margin-top:4px;">
         ${!s.snapOk?`快照僅 ${snaps.length} 筆，需累積 ≥3 筆`:
           s.grade==='WATCH'?'移動幅度 0.5–1.0，屬觀察範圍，非蒸汽信號':
           '等待盤口出現明顯移動（≥1.0）再考慮進場'}
       </div>
+      <div style="margin-top:8px;font-size:10px;">資料充足度 ${snapBar(snaps.length)} ${snaps.length}/6</div>
     </div>`;
 
   if(!e.totalBet&&!e.mlBet){
@@ -1526,8 +1559,16 @@ function renderDetail(g){
     const statusBg=e.rdy?'rgba(74,222,128,.12)':e.lbl==='等待停滯'?'rgba(251,191,36,.12)':'rgba(75,85,99,.1)';
     conclusionHtml=`
       <div class="decision-box ${boxCls}" style="background:${mainBet.col}0d;border:1px solid ${mainBet.col}30;margin-bottom:14px;">
-        <div class="db-label" style="color:${mainBet.col};">📌 今日建議下注</div>
-        <div class="db-main" style="color:${mainBet.col};">${mainBet.label}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+          <div>
+            <div class="db-label" style="color:${mainBet.col};">📌 今日建議下注</div>
+            <div class="db-main" style="color:${mainBet.col};">${mainBet.label}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:8px;color:#545d68;letter-spacing:1px;">蒸汽強度</div>
+            <div style="font-size:26px;font-weight:900;line-height:1;color:${ss.col};font-family:monospace;">${ss.score}<span style="font-size:12px;">/10</span></div>
+          </div>
+        </div>
         ${secBet?`<div style="font-size:13px;font-weight:700;color:${secBet.col};margin-top:5px;">+ 🦈 ${secBet.label}</div>`:''}
         ${e.totalBet&&trend?`<div class="db-sub" style="margin-top:6px;">${trend.txt}</div>`:''}
         ${e.mlBet&&!e.totalBet?`<div class="db-sub" style="margin-top:6px;">${e.mlBet.hint}</div>`:''}
@@ -1535,6 +1576,7 @@ function renderDetail(g){
           <span class="db-status" style="background:${statusBg};color:${statusCol};">
             ${e.rdy?'✓ 移動停滯，可進場':e.lbl==='等待停滯'?'⏳ 等待停滯才進場':e.lbl==='觀察中'?'👁 觀察中，快照不足':'─ '+e.lbl}
           </span>
+          <span style="font-size:10px;color:#64748b;">資料充足度 ${snapBar(snaps.length)} ${snaps.length}/6</span>
           ${e.totalBet?.timeNote?`<span style="font-size:10px;color:#64748b;">${e.totalBet.timeNote}</span>`:''}
         </div>
         ${e.reason&&e.lbl==='等待停滯'?`<div style="font-size:10px;color:#fbbf24;margin-top:4px;">💡 ${e.reason}</div>`:''}
@@ -1546,66 +1588,36 @@ function renderDetail(g){
   if(!dpFixed||!dpScroll) return;
   dpScroll.style.display='block';
 
-  // ── 固定頂部：球隊名 + 進場按鈕 + 建議下注 + 圖表 ──────────────────────────
+  // ── 固定頂部：決策區(最大) + 球隊名(縮小,次要) + 圖表 ──────────────────────
+  // v6.0：conclusionHtml 過去只是算出來、從沒被插進頁面。這是這次要修的核心 bug——
+  // 「該最顯眼的東西」實際上從沒顯示過，隊名自然變成畫面上最大的字。
   dpFixed.innerHTML=`
-    <!-- HEADER -->
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-      <div>
-        <div style="font-size:20px;font-weight:900;color:#cdd9e5;line-height:1.2;">
-          ${away.split(' ').pop()} VS ${home.split(' ').pop()}
-        </div>
-        <div style="font-size:11px;color:#768390;margin-top:4px;">
-          開賽: ${dstr} ${fet(g.commence_time)}
-          ${s.d!==0?`<span style="margin-left:8px;font-weight:700;color:${s.col};">${s.lbl} ${s.d>0?'▲+':'▼'}${Math.abs(s.d)}</span>`:''}
-          ${s.mlSig!=='FLAT'?`<span style="margin-left:8px;color:#d2a8ff;">🦈 獨贏信號</span>`:''}
-        </div>
-        <!-- Steam Score -->
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:5px;background:#0d1117;border:1px solid #2d3748;border-radius:6px;padding:4px 10px;">
-            <span style="font-size:9px;color:#545d68;letter-spacing:1px;">蒸汽強度</span>
-            <span style="font-size:20px;font-weight:900;color:${ss.col};font-family:monospace;">${ss.score}</span>
-            <span style="font-size:9px;font-weight:700;color:${ss.col};">/10</span>
-            <span style="font-size:10px;font-weight:700;color:${ss.col};padding:1px 6px;border-radius:3px;background:${ss.col}12;border:1px solid ${ss.col}25;">${ss.label}</span>
-          </div>
-          <div style="font-size:9px;color:#374151;line-height:1.5;">
-            ${starRating(g.snapshot_count||0)} 快照 ${g.snapshot_count||0}筆<br>
-            <span style="color:#374151;">★=快照品質，非推薦強度</span>
-          </div>
-        </div>
-        <!-- 計分明細 -->
-        <div style="margin-top:5px;font-size:9px;color:#374151;display:flex;gap:8px;flex-wrap:wrap;">
-          <span>移動:<b style="color:#545d68;"> ${Math.abs(s.d)>=1.5?'+8':Math.abs(s.d)>=1.0?'+5':Math.abs(s.d)>=0.5?'+3':'+1'}</b></span>
-          <span>ML同步:<b style="color:${s.mlSig!=='FLAT'?'#56d364':'#374151'}"> ${s.mlSig!=='FLAT'?'+1':'—'}</b></span>
-          <span>快照≥5:<b style="color:${(g.snapshot_count||0)>=5?'#56d364':'#374151'}"> ${(g.snapshot_count||0)>=5?'+0.5':'—'}</b></span>
-          <span>停滯:<b style="color:${ss.settled?'#56d364':'#374151'}"> ${ss.settled?'+0.5':'等待中'}</b></span>
-          <span title="盤口穿越 7–9.5 關鍵數字的次數，穿越=莊家大幅重估">關鍵穿越:<b style="color:${ss.kx>=1?'#56d364':'#374151'}"> ${ss.kx>=2?'+1':ss.kx===1?'+0.5':'—'}</b></span>
-          <span title="單向率=淨移動/總路徑。1.0=資金持續同向（強）、<0.6=來回震盪（不可靠）">單向率:<b style="color:${ss.owr>=0.9?'#56d364':ss.owr<0.6?'#ff7b72':'#374151'}"> ${ss.owr}</b></span>
-        </div>
+    ${conclusionHtml}
+    <!-- 次要資訊：隊名 + 時間（縮小，職業玩家第一眼不看這個） -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-size:13px;font-weight:700;color:#768390;">
+        ${away.split(' ').pop()} <span style="color:#2d3748;">VS</span> ${home.split(' ').pop()}
+        <span style="margin-left:8px;font-size:10px;color:#545d68;font-weight:400;">開賽 ${dstr} ${fet(g.commence_time)}</span>
+        ${s.mlSig!=='FLAT'?`<span style="margin-left:6px;font-size:10px;color:#d2a8ff;">🦈獨贏信號</span>`:''}
       </div>
       <button style="background:${e.rdy?'#da3633':e.lbl==='等待停滯'?'#5a4000':'#21262d'};
         color:${e.rdy?'#fff':e.lbl==='等待停滯'?'#f0b429':'#768390'};
-        border:none;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:800;
+        border:none;padding:7px 14px;border-radius:6px;font-size:11px;font-weight:800;
         cursor:${e.rdy?'pointer':'default'};font-family:inherit;white-space:nowrap;flex-shrink:0;
         ${e.rdy?'animation:pr 1.4s ease-in-out infinite;':''}"
         onclick="${e.rdy?`alert('建議：${e.totalBet?.label||e.mlBet?.label||''}\\n規則：移動停滯後才進場')`:''}"
       >${e.rdy?'🔥 建議進場':e.lbl==='等待停滯'?'⏳ 等待停滯':e.lbl}</button>
     </div>
-
-    <!-- 建議下注（有信號才顯示） -->
-    ${(e.totalBet||e.mlBet)?`
-    <div style="background:${(e.totalBet||e.mlBet).col}0d;border:1px solid ${(e.totalBet||e.mlBet).col}22;
-      border-radius:6px;padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
-      <div>
-        <div style="font-size:14px;font-weight:900;color:${(e.totalBet||e.mlBet).col};">
-          ${(e.totalBet||e.mlBet).label}
-          ${e.mlBet&&e.totalBet?`<span style="font-size:11px;color:#d2a8ff;margin-left:8px;">+ 🦈 ${e.mlBet.label}</span>`:''}
-        </div>
-        <div style="font-size:10px;color:#545d68;margin-top:2px;">
-          ${e.rdy?'✓ 移動已停滯':e.lbl==='等待停滯'?'⏳ 仍移動中，等停滯後進場':''}
-          ${e.totalBet?.timeNote?` · ${e.totalBet.timeNote}`:''}
-        </div>
-      </div>
-    </div>`:''}
+    <!-- 計分明細（收合式次要資訊，給想深入看的人） -->
+    <div style="margin-bottom:10px;font-size:9px;color:#374151;display:flex;gap:8px;flex-wrap:wrap;">
+      ${starRating(g.snapshot_count||0)} <span>快照 ${g.snapshot_count||0}筆</span>
+      <span>移動:<b style="color:#545d68;"> ${Math.abs(s.d)>=3.0?'+7':Math.abs(s.d)>=2.0?'+6':Math.abs(s.d)>=1.5?'+5':Math.abs(s.d)>=1.0?'+4':Math.abs(s.d)>=0.5?'+3':'+1'}</b></span>
+      <span>ML同步:<b style="color:${s.mlSig!=='FLAT'?'#56d364':'#374151'}"> ${s.mlSig!=='FLAT'?'+1':'—'}</b></span>
+      <span>快照≥5:<b style="color:${(g.snapshot_count||0)>=5?'#56d364':'#374151'}"> ${(g.snapshot_count||0)>=5?'+0.5':'—'}</b></span>
+      <span>停滯:<b style="color:${ss.settled?'#56d364':'#374151'}"> ${ss.settled?'+0.5':'等待中'}</b></span>
+      <span title="盤口穿越 7–9.5 關鍵數字的次數（此加分尚未經統計驗證，權重已減半）">關鍵穿越:<b style="color:${ss.kx>=1?'#56d364':'#374151'}"> ${ss.kx>=2?'+0.5':ss.kx===1?'+0.25':'—'}</b></span>
+      <span title="單向率=淨移動/總路徑（此加分尚未經統計驗證，權重已減半）">單向率:<b style="color:${ss.owr>=0.9?'#56d364':ss.owr<0.6?'#ff7b72':'#374151'}"> ${ss.owr}</b></span>
+    </div>
 
     <!-- 圖表 + 信號解讀 並排（左圖右解讀） -->
     <div style="display:flex;gap:10px;align-items:stretch;">
@@ -1621,6 +1633,12 @@ function renderDetail(g){
         </div>
         <div style="position:relative;height:160px;width:100%;">
           <canvas id="lc"></canvas>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:6px;font-size:8px;color:#545d68;flex-wrap:wrap;">
+          <span>● <span style="color:#38bdf8;">藍</span>=一般變動</span>
+          <span>● <span style="color:#ff7b72;">紅</span>=蒸汽變動(單步≥0.5)</span>
+          <span>┄ <span style="color:#fbbf24;">黃</span>=主隊獨贏(ML)</span>
+          ${(g.snapshot_count||0)<3?`<span style="color:#374151;">· 快照僅 ${g.snapshot_count||0} 筆，圖表僅供參考</span>`:''}
         </div>
       </div>
       <!-- 信號解讀（右側，佔40%） -->
