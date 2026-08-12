@@ -1,5 +1,16 @@
 """
-MLB Pinnacle Tracker v6.0
+MLB Pinnacle Tracker v6.1
+
+v6.1（2026-08-12）── 實測 17 天只多累積 1 場誠實樣本，發現視窗設計本身有問題：
+- [重大修正] `/calibration` 主視窗從「近30天滾動」改成「自 v6.0 部署起擴張」。
+  原因：鎖定速度約 2–3 週才新增 1 場，30天滾動視窗下新樣本進來的速度追不上
+  舊樣本被踢出視窗的速度，min_sample=20 在滾動視窗下永遠不可能達成。
+  近30天滾動視窗保留成 `recent_30d_reference`（次要參考，不餵進建議引擎）。
+- [新] `/diagnostics/locks`：鎖定漏斗診斷，把每場比賽在決策窗口的評估結果分類
+  （locked / no_signal / insufficient_snapshots / too_close_to_game / already_locked），
+  回答「為什麼樣本累積這麼慢」是門檻太嚴還是市場本來就少見大幅移動。
+- [新] `lock_diag` collection：`lock_picks()` 現在會對每場比賽（不只是成功鎖定的）
+  都寫一筆診斷紀錄，upsert（同一天同一場只留最後一次評估結果）。
 
 v6.0（2026-07-12）── 結算基準修正，這是一次「破壞性誠實化」：
 - [重大 BUG 修正] 舊版結算拿「開盤價 open_total」對帳，但 pick 用的是「最新盤口」。
@@ -372,6 +383,9 @@ async def lock_picks(force: bool = False) -> dict:
     line_at_pick = 鎖定當下 Pinnacle 的盤口 = 你真正買得到的價。
 
     鎖定後永不覆蓋（絕不能用後見之明修改當初的判斷）。
+
+    v6.1：每場（不管有沒有鎖定）都寫一筆診斷紀錄到 lock_diag，用 upsert
+    （同一天同一場只留最後一次評估結果），用來回答「為什麼誠實樣本累積這麼慢」。
     """
     ts = utc_now()
     if not force and not in_decision_window():
@@ -380,37 +394,54 @@ async def lock_picks(force: bool = False) -> dict:
     today     = et_date_str(ts)
     snaps_col = get_db()["snapshots"]
     picks_col = get_db()["picks"]
+    diag_col  = get_db()["lock_diag"]
     docs      = await snaps_col.find({"date": today}).to_list(50)
+
+    async def diag(d, outcome, **extra):
+        await diag_col.update_one(
+            {"game_id": d["game_id"], "date": today},
+            {"$set": {"outcome": outcome, "checked_at": ts,
+                      "home": d.get("home"), "away": d.get("away"), **extra}},
+            upsert=True,
+        )
 
     locked = skipped = 0
     for d in docs:
         # 已鎖定 → 跳過（永不覆蓋）
         if await picks_col.find_one({"game_id": d["game_id"], "date": today}):
             skipped += 1
+            await diag(d, "already_locked")
             continue
 
         snaps = pregame_snaps(d)
         if len(snaps) < 2:
+            await diag(d, "insufficient_snapshots", snapshot_count=len(snaps))
             continue
 
         try:
             ct = datetime.fromisoformat(d["commence_time"].replace("Z", "+00:00"))
         except Exception:
+            await diag(d, "bad_commence_time")
             continue
         mins_to_game = int((ct - ts).total_seconds() / 60)
         if mins_to_game < MIN_MINUTES_TO_GAME:
+            await diag(d, "too_close_to_game", minutes_to_game=mins_to_game)
             continue  # 來不及下注，不列入紀錄（否則等於偷跑）
 
         sig  = signal_from_snaps(snaps)
         last = snaps[-1]
         line = last.get("total")
         if line is None:
+            await diag(d, "no_line")
             continue
 
         direction        = pick_direction(sig)                            # 正式 pick（含 sharp 過濾）
         shadow_direction = pick_direction(sig, ignore_sharp_filter=True)  # 影子 pick（無過濾）
         if not direction and not shadow_direction:
-            continue  # 無任何方向信號，不需要鎖
+            # 移動幅度沒到 STEAM 門檻（<1.0）——這是目前最可能的瓶頸，
+            # WATCH(0.5-0.9)/FLAT 都會落在這裡，永遠不會被鎖定或影子結算。
+            await diag(d, "no_signal", grade=sig.get("grade","FLAT"), delta=sig.get("delta",0))
+            continue
 
         open_total = snaps[0].get("total")
         await picks_col.insert_one({
@@ -445,6 +476,7 @@ async def lock_picks(force: bool = False) -> dict:
             # 盤口跑掉多少（= 舊版灌水幅度）
             "line_drift":     round(line - open_total, 1) if open_total is not None else None,
         })
+        await diag(d, "locked", direction=direction, shadow_only=(direction is None))
         locked += 1
 
     if locked:
@@ -722,18 +754,20 @@ async def lifespan(app: FastAPI):
         await db["model_stats"].create_index([("period_days",1)],       unique=True)
         # v6.0：鎖定的 pick（每場只鎖一次，unique 防重複覆蓋）
         await db["picks"].create_index([("game_id",1),("date",1)],      unique=True)
+        # v6.1：鎖定漏斗診斷（每場每天一筆，upsert，記錄最後一次評估結果）
+        await db["lock_diag"].create_index([("game_id",1),("date",1)],  unique=True)
         log.info("✅ MongoDB connected")
     await fetch_and_store_odds(force=True)
     await lock_picks()
     await fetch_and_settle()
     await daily_model_correction()
     asyncio.create_task(scheduler())
-    log.info(f"⏰ v6.0 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
+    log.info(f"⏰ v6.1 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
     log.info(f"🔒 決策窗口 ET {DECISION_ET_HOUR:02d}:{DECISION_ET_MIN:02d}（台灣 22:35）鎖定 pick + line_at_pick")
     yield
     if client_db: client_db.close()
 
-app = FastAPI(title="MLB Pinnacle Tracker v6.0", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker v6.1", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET","POST","OPTIONS"], allow_headers=["*"])
 
@@ -742,7 +776,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 async def root():
     et = et_now()
     return {
-        "status": "ok", "version": "6.0",
+        "status": "ok", "version": "6.1",
         "et_time": et.strftime("%Y-%m-%d %H:%M ET"),
         "active":  is_active_hours(),
         "schedule": f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
@@ -752,6 +786,8 @@ async def root():
         "in_decision_window": in_decision_window(),
         "settle_basis": "line_at_pick（鎖定當下的真實可下注盤口）",
         "stats_policy": f"Wilson 95% 下界 > {BREAKEVEN_WR}% 且樣本 ≥ {MIN_SAMPLE_FOR_CLAIM} 才算有 edge",
+        "calibration_window": "expanding since v6.0 deploy (not 30-day rolling, see /calibration)",
+        "diagnostics": "/diagnostics/locks — 為什麼誠實樣本累積這麼慢",
     }
 
 @app.get("/refresh")
@@ -1237,26 +1273,38 @@ async def get_calibration():
     """
     邏輯校正分析：把歷史結算按條件分桶，找出哪些條件勝率最高
     用於每週調整篩選邏輯
+
+    v6.1：主視窗改成「從 v6.0 部署日起算、不斷擴張」，不再是近 30 天滾動。
+    原因：實際觀察到鎖定速度大約 2–3 週才新增 1 場誠實樣本，滾動 30 天視窗會讓
+    新樣本進來的速度追不上舊樣本被踢出視窗的速度 —— 樣本量永遠卡在 1–2 場，
+    min_sample=20 的門檻在滾動視窗下等於永遠不可能達成。
+    擴張視窗才能讓樣本真的累積。等總量夠大（比如破百場）後，
+    可以額外疊加一個近期滾動視窗來看「近況有沒有飄移」，但那是次要用途，
+    現在的當務之急是先把基礎樣本量攢起來。
     """
-    ts       = utc_now()
-    cutoff   = et_date_str(ts - timedelta(days=30))
+    ts = utc_now()
 
     # ── 只信任誠實資料（v6.0）──────────────────────────────────────────────
     # settle_version >= 6 且有 line_at_pick = 對帳「真正買得到的盤口」的結算。
     # v5 以前的資料拿開盤價對帳，勝率被系統性灌水（且灌水量與 delta 成正比），
     # 拿它調參數等於把 bug 固化進模型 → 一律排除。
+    # 注意：這裡不再限制 date >= 30天前 —— settle_version 過濾本身就已經把
+    # 範圍限制在 v6.0 部署之後了，不需要再疊加一層會把新樣本踢掉的日期窗口。
     q_honest = {
-        "date": {"$gte": cutoff},
         "settle_version": {"$gte": SETTLE_VERSION},
         "line_at_pick": {"$ne": None},
         "$or": [{"result":        {"$in": ["WIN", "LOSS"]}},
                 {"shadow_result": {"$in": ["WIN", "LOSS"]}}],
     }
-    docs = await get_db()["history"].find(q_honest).to_list(500)
+    docs = await get_db()["history"].find(q_honest).to_list(2000)
+    earliest_honest_date = min((d["date"] for d in docs), default=None)
+    days_accumulating = (
+        (ts - datetime.fromisoformat(earliest_honest_date).replace(tzinfo=timezone.utc)).days
+        if earliest_honest_date else 0
+    )
 
-    # 被排除的舊灌水資料有多少（讓你知道為什麼樣本突然變小）
+    # 被排除的舊灌水資料有多少（全部歷史，不限視窗——讓你知道總共排除了多少）
     legacy_excluded = await get_db()["history"].count_documents({
-        "date": {"$gte": cutoff},
         "result": {"$in": ["WIN", "LOSS"]},
         "$or": [{"settle_version": {"$exists": False}},
                 {"settle_version": {"$lt": SETTLE_VERSION}}],
@@ -1374,37 +1422,51 @@ async def get_calibration():
                 f"— 無定論，維持現狀"
             )
 
+    # ── 次要參考：近 30 天滾動（只給「近況有沒有飄移」用，不餵進建議引擎）───────
+    # 樣本量還小的時候這塊幾乎注定是空的或極小樣本，正常現象，不代表故障。
+    cutoff_30d   = et_date_str(ts - timedelta(days=30))
+    recent_docs  = [d for d in docs if d.get("date", "") >= cutoff_30d]
+    recent_30d = {
+        "note": "僅供近況參考，不用於建議引擎（樣本太小時本來就該是空的）",
+        "sample_size": len(recent_docs),
+        "stats": bucket_stats(recent_docs),
+    }
+
     warnings = [
-        f"⚠ 已排除 {legacy_excluded} 筆 v5 以前的結算資料（拿開盤價對帳，勝率被系統性灌水）。"
-        f"樣本會從 v6.0 部署日重新累積。",
+        f"⚠ 累計已排除 {legacy_excluded} 筆 v5 以前的結算資料（拿開盤價對帳，勝率被系統性灌水）。",
         f"⚠ 判定標準：Wilson 95% 信賴下界 > {BREAKEVEN_WR}%（-110 損益平衡點）才算有 edge，"
         f"且至少 {MIN_SAMPLE_FOR_CLAIM} 場。原始勝率高不代表有 edge。",
-        "⚠ 30天滾動視窗每週重疊 29 天 —— 每週在幾乎同一批資料上重新調參 = 過擬合複利。"
-        "建議每月調一次，或改用不重疊的區間比較。",
+        "⚠ v6.1：主視窗已從「近30天滾動」改成「自 v6.0 部署起擴張」。"
+        "原因：實測鎖定速度約 2–3 週才新增 1 場誠實樣本，30天滾動視窗下新樣本進來的速度"
+        "追不上舊樣本被踢出視窗的速度，min_sample=20 在滾動視窗下永遠達不到。"
+        "等總樣本量夠大（建議 ≥100 場）之後，可以考慮換回滾動視窗來看近況飄移——"
+        "但那是之後的事，現在先讓樣本長大。想知道為什麼鎖定這麼慢，看 /diagnostics/locks。",
         "⚠ 同時檢驗多個分桶會放大偽陽性（跑 18 個桶，即使全無 edge 也預期約 1 個會「顯著」）。"
         "單一分桶亮綠燈不足以行動，要看它是否跨期穩定重現。",
     ]
     if inflation_check["對帳 line_at_pick（真實·現行）"]["total"] == 0:
-        warnings.insert(0, "🔎 目前尚無 v6.0 誠實樣本（需等新的比賽在決策窗口鎖定並結算）。"
-                           "本報告的分桶全為空是預期行為，不是故障。")
+        warnings.insert(0, "🔎 目前尚無正式 pick 被結算（只有影子結算）。"
+                           "這不代表故障——只是還沒有一場移動幅度夠大、又通過 sharp 過濾的信號被結算過。")
 
     return {
-        "period":            "近30天",
-        "sample_size":       len(docs),
-        "legacy_excluded":   legacy_excluded,
-        "settle_version":    SETTLE_VERSION,
-        "breakeven_wr":      BREAKEVEN_WR,
-        "min_sample":        MIN_SAMPLE_FOR_CLAIM,
-        "inflation_check":   inflation_check,
-        "by_delta":          by_delta,
-        "by_money":          by_money,
-        "by_direction":      by_direction,
-        "by_cross":          by_cross,
-        "by_key_cross":      by_key_cross,   # ⚠ 此加分過去從未被驗證
-        "by_one_way":        by_one_way,     # ⚠ 此加分過去從未被驗證
-        "suggestions":       suggestions,
-        "warnings":          warnings,
-        "generated_at":      ts.isoformat(),
+        "period":              f"自 v6.0 部署起累積（{earliest_honest_date or '尚無資料'} 至今，共 {days_accumulating} 天）",
+        "window_type":         "expanding",  # v6.1：擴張視窗，不再是30天滾動
+        "sample_size":         len(docs),
+        "legacy_excluded":     legacy_excluded,
+        "settle_version":      SETTLE_VERSION,
+        "breakeven_wr":        BREAKEVEN_WR,
+        "min_sample":          MIN_SAMPLE_FOR_CLAIM,
+        "recent_30d_reference": recent_30d,
+        "inflation_check":     inflation_check,
+        "by_delta":            by_delta,
+        "by_money":            by_money,
+        "by_direction":        by_direction,
+        "by_cross":            by_cross,
+        "by_key_cross":        by_key_cross,   # ⚠ 此加分過去從未被驗證
+        "by_one_way":          by_one_way,     # ⚠ 此加分過去從未被驗證
+        "suggestions":         suggestions,
+        "warnings":            warnings,
+        "generated_at":        ts.isoformat(),
     }
 
 
@@ -1437,6 +1499,54 @@ async def get_picks():
         "key_cross":     d.get("key_cross"),
         "one_way_ratio": d.get("one_way_ratio"),
     } for d in docs]
+
+
+@app.get("/diagnostics/locks")
+async def get_lock_diagnostics(days: int = 14):
+    """
+    鎖定漏斗診斷（v6.1）：回答「為什麼誠實樣本累積這麼慢」。
+
+    每場比賽在決策窗口都會被分類到一個結果：
+      locked              成功鎖定（正式 pick 或影子 pick）
+      no_signal           移動幅度沒到 STEAM 門檻（<1.0）—— 目前最可能是最大瓶頸，
+                           WATCH(0.5-0.9)/FLAT 都會落在這裡，永遠不會被鎖定
+      insufficient_snapshots  快照 <2 筆，資料不夠判斷方向
+      too_close_to_game   評估時已經來不及下注（<20分鐘開賽）
+      no_line             最新快照沒有 total 盤口
+      already_locked      今天稍早已經鎖過（正常，不是問題）
+
+    只看 no_signal 佔比高不高，就知道問題是「門檻太嚴」還是「市場本來就很少大幅移動」。
+    """
+    ts     = utc_now()
+    cutoff = et_date_str(ts - timedelta(days=days))
+    docs   = await get_db()["lock_diag"].find({"date": {"$gte": cutoff}}).to_list(2000)
+
+    by_date = {}
+    totals  = {}
+    for d in docs:
+        date = d["date"]
+        outc = d.get("outcome", "unknown")
+        by_date.setdefault(date, {}).setdefault(outc, 0)
+        by_date[date][outc] += 1
+        totals[outc] = totals.get(outc, 0) + 1
+
+    total_evaluated = sum(totals.values())
+    total_locked    = totals.get("locked", 0)
+    total_no_signal = totals.get("no_signal", 0)
+
+    return {
+        "period_days":       days,
+        "total_evaluated":   total_evaluated,
+        "total_locked":      total_locked,
+        "lock_rate":         round(total_locked/total_evaluated*100, 1) if total_evaluated else None,
+        "no_signal_rate":    round(total_no_signal/total_evaluated*100, 1) if total_evaluated else None,
+        "by_outcome":        totals,
+        "by_date":           dict(sorted(by_date.items())),
+        "note": ("no_signal 佔比高 = 大部分場次移動幅度就是沒到 1.0，這可能是市場本來就效率高、"
+                 "大幅移動罕見（正常），也可能代表 STEAM 門檻對現在的資料量來說太嚴——"
+                 "但降門檻是策略決定，不在這支診斷端點的職責內，交給你自己判斷。"),
+        "generated_at":      ts.isoformat(),
+    }
 
 
 if __name__ == "__main__":
