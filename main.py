@@ -1,5 +1,21 @@
 """
-MLB Pinnacle Tracker v6.1
+MLB Pinnacle Tracker v6.2
+
+v6.2（2026-08-17）── /diagnostics/locks 跑出來，發現瓶頸比「市場少見大幅移動」更根本：
+- [重大修正] 鎖定判斷從「固定時鐘（ET 10:35 全部比賽共用）」改成「相對每場比賽自己的
+  開賽時間」（開賽前 20分鐘～8小時）。原因：診斷顯示 too_close_to_game 佔比（39%）比
+  no_signal（37%）還高——中午開打的日場常常還沒到 10:35 就已經不到 20 分鐘開賽，
+  直接被判來不及下注，連被評估的機會都沒有。這是設計問題，不是資料量問題。
+  附加好處：新設計對「排程幾點真的醒著執行」不敏感，不再需要精準卡在某個時鐘點。
+- [發現，非本次程式碼可解決] 診斷同時顯示 14 天內有 10 天完全沒有任何診斷紀錄
+  （不是市場沒信號——沒信號會留下 no_signal 紀錄，是排程那天根本沒執行過），
+  高度懷疑是 Render 免費方案閒置休眠導致背景排程整天沒醒來。這需要外部 keep-alive
+  服務（定期 ping）解決，不是後端程式碼能自己修的，`/diagnostics/locks` 新增
+  `missing_days` 欄位方便持續追蹤。
+- [變更] `in_decision_window()` / `DECISION_ET_HOUR` 保留，但只作為 `/summary` 的
+  人類參考時間點（「你什麼時候該來看網站」），跟後端鎖定邏輯完全脫鉤。
+- [變更] `/summary` 現在每次被打開都會嘗試 `lock_picks()`（idempotent，成本低），
+  順便讓「使用者開網站」這個動作也能在服務休眠時把它叫醒、多一次鎖定機會。
 
 v6.1（2026-08-12）── 實測 17 天只多累積 1 場誠實樣本，發現視窗設計本身有問題：
 - [重大修正] `/calibration` 主視窗從「近30天滾動」改成「自 v6.0 部署起擴張」。
@@ -66,11 +82,21 @@ THRESHOLD_STEAM     = 1.0  # 1.0–1.4 蒸汽
 THRESHOLD_WATCH     = 0.5  # 0.5–0.9 觀察
 ML_THRESHOLD        = 15   # ML 移動 ≥ 15 算獨贏信號
 
-# ── 決策窗口（v6.0）──────────────────────────────────────────────────────────
-# 你的實際下注時間：台灣 22:35 = ET 10:35。pick 與盤口在此刻鎖定。
+# ── 鎖定視窗（v6.2）───────────────────────────────────────────────────────────
+# v6.1 以前：用單一固定時鐘（ET 10:35）當「所有比賽」共用的鎖定起點，早場（中午開打的
+# getaway day games）常常還沒到 10:35 就已經不到 20 分鐘開賽，直接被判「來不及下注」，
+# 連被評估的機會都沒有——診斷數據顯示 too_close_to_game 佔了近4成，比 no_signal 還多。
+# v6.2：鎖定改成「每場比賽自己的開賽前 N 小時」，不再依賴某個固定時鐘點，
+# 這樣早場、晚場都用同一套相對邏輯獨立判斷，且對「服務睡著幾點醒來」也不敏感——
+# 不管排程什麼時候真的執行到，只要當下落在該場比賽自己的視窗內就會被鎖定。
+LOCK_WINDOW_MAX_HOURS = 8     # 開賽前 >8 小時暫不評估（盤口通常還沒開始有意義移動）
+MIN_MINUTES_TO_GAME   = 20    # 距開賽 <20 分鐘視為來不及下注，不鎖定（誠信底線，不可覆蓋）
+
+# ── 固定時鐘（v6.0，保留作為「你什麼時候該來看網站」的參考，不再用來閘控鎖定）──────
+# 台灣時間 22:35 = ET 10:35，是給 /summary 顯示用的人類參考時間點，
+# 跟後端鎖定邏輯（上面的相對視窗）已經脫鉤。
 DECISION_ET_HOUR     = 10
 DECISION_ET_MIN      = 35
-MIN_MINUTES_TO_GAME  = 20   # 距開賽 <20 分鐘視為來不及下注，不鎖定
 
 # ── 統計嚴謹度（v6.0）────────────────────────────────────────────────────────
 SETTLE_VERSION           = 6      # 只有 >= 此版本的結算資料才進 /calibration
@@ -369,32 +395,47 @@ async def fetch_and_store_odds(force: bool = False) -> dict:
         log.error(f"fetch_odds error: {e}")
         return {"error": str(e)}
 
-# ── 鎖定 Pick（v6.0 核心）─────────────────────────────────────────────────────
+# ── 鎖定 Pick（v6.2：相對開賽時間，不用固定時鐘）───────────────────────────────
 def in_decision_window() -> bool:
+    """
+    v6.2：這個函式現在只給 /summary 用來決定「現在適不適合給人類看結果」，
+    跟後端要不要鎖定 pick 已經脫鉤（鎖定改用每場比賽自己的相對視窗，見 lock_picks）。
+    """
     et = et_now()
     return (et.hour > DECISION_ET_HOUR) or (et.hour == DECISION_ET_HOUR and et.minute >= DECISION_ET_MIN)
 
 async def lock_picks(force: bool = False) -> dict:
     """
-    在真實決策窗口（ET 10:35 / 台灣 22:35）鎖定 pick + 當下盤口。
+    鎖定 pick + 當下盤口（v6.2：相對每場比賽開賽時間判斷，不再用單一固定時鐘）。
+
+    v6.0～v6.1 用「ET 10:35」當全部比賽共用的鎖定起點，早場（中午開打）常常還沒到
+    10:35 就已經不到 20 分鐘開賽，直接被判「來不及下注」——診斷數據顯示這佔了近4成，
+    比訊號不足還多。v6.2 改成每場比賽獨立看「現在距離開賽還有多久」：
+    落在 [MIN_MINUTES_TO_GAME, LOCK_WINDOW_MAX_HOURS×60] 分鐘內就評估，不管現在幾點。
+    這樣做還有個附加好處：對「排程幾點真的醒著執行」不敏感——不管服務因為
+    Render 免費方案休眠、幾點被喚醒，只要喚醒時當下落在某場比賽的視窗內，
+    照樣會被正確鎖定，不需要精準卡在某個時鐘點才生效。
 
     為什麼要鎖：舊版結算拿 open_total（開盤價）對帳，但你看到信號時盤口早就跑掉了。
     盤口 8.0→11.0，系統推 OVER 11.0 卻用 8.0 結算，等於用一個買不到的價在算勝率。
     line_at_pick = 鎖定當下 Pinnacle 的盤口 = 你真正買得到的價。
 
     鎖定後永不覆蓋（絕不能用後見之明修改當初的判斷）。
+    force=True 只會放寬「開賽前 >8 小時暫不評估」這個上限（手動測試用）；
+    「距開賽 <20 分鐘不鎖」是誠信底線，force 也不能覆蓋。
 
-    v6.1：每場（不管有沒有鎖定）都寫一筆診斷紀錄到 lock_diag，用 upsert
+    每場（不管有沒有鎖定）都寫一筆診斷紀錄到 lock_diag，用 upsert
     （同一天同一場只留最後一次評估結果），用來回答「為什麼誠實樣本累積這麼慢」。
     """
     ts = utc_now()
-    if not force and not in_decision_window():
-        return {"skipped": "before_decision_window", "et_hour": et_now().hour}
 
     today     = et_date_str(ts)
     snaps_col = get_db()["snapshots"]
     picks_col = get_db()["picks"]
     diag_col  = get_db()["lock_diag"]
+    # 相對視窗不再限定「今天」的日期字串一定對得上鎖定當下的 ET 日期
+    # （半夜跨日的場次仍可能落在同一批 snapshots 文件內），這裡沿用原本以
+    # snapshots.date 分組的作法，涵蓋範圍已經足夠；跨日邊界場次下一輪還會再評估一次。
     docs      = await snaps_col.find({"date": today}).to_list(50)
 
     async def diag(d, outcome, **extra):
@@ -413,20 +454,25 @@ async def lock_picks(force: bool = False) -> dict:
             await diag(d, "already_locked")
             continue
 
-        snaps = pregame_snaps(d)
-        if len(snaps) < 2:
-            await diag(d, "insufficient_snapshots", snapshot_count=len(snaps))
-            continue
-
         try:
             ct = datetime.fromisoformat(d["commence_time"].replace("Z", "+00:00"))
         except Exception:
             await diag(d, "bad_commence_time")
             continue
         mins_to_game = int((ct - ts).total_seconds() / 60)
+
+        # ★ v6.2 核心：相對每場比賽自己的開賽時間判斷視窗，不看現在是幾點鐘
         if mins_to_game < MIN_MINUTES_TO_GAME:
             await diag(d, "too_close_to_game", minutes_to_game=mins_to_game)
-            continue  # 來不及下注，不列入紀錄（否則等於偷跑）
+            continue  # 來不及下注，不列入紀錄（否則等於偷跑）——誠信底線，force 也不能覆蓋
+        if not force and mins_to_game > LOCK_WINDOW_MAX_HOURS * 60:
+            await diag(d, "too_early", minutes_to_game=mins_to_game)
+            continue  # 離開賽還太久，盤口通常還沒開始有意義移動，下一輪再評估
+
+        snaps = pregame_snaps(d)
+        if len(snaps) < 2:
+            await diag(d, "insufficient_snapshots", snapshot_count=len(snaps))
+            continue
 
         sig  = signal_from_snaps(snaps)
         last = snaps[-1]
@@ -726,7 +772,7 @@ async def scheduler():
     while True:
         if is_active_hours():
             await fetch_and_store_odds()
-            # ★ 決策窗口一到就鎖定 pick + 當下盤口（idempotent，已鎖定的不會被覆蓋）
+            # ★ 每輪都用「每場比賽自己的相對開賽時間視窗」評估鎖定（idempotent，已鎖定的不會被覆蓋）
             await lock_picks()
             await fetch_and_settle()
             # 每天 ET 06:00 之後第一次抓取時執行模型修正
@@ -762,12 +808,12 @@ async def lifespan(app: FastAPI):
     await fetch_and_settle()
     await daily_model_correction()
     asyncio.create_task(scheduler())
-    log.info(f"⏰ v6.1 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
-    log.info(f"🔒 決策窗口 ET {DECISION_ET_HOUR:02d}:{DECISION_ET_MIN:02d}（台灣 22:35）鎖定 pick + line_at_pick")
+    log.info(f"⏰ v6.2 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
+    log.info(f"🔒 鎖定視窗：每場開賽前 {MIN_MINUTES_TO_GAME}分鐘～{LOCK_WINDOW_MAX_HOURS}小時內（相對每場比賽，非固定時鐘）")
     yield
     if client_db: client_db.close()
 
-app = FastAPI(title="MLB Pinnacle Tracker v6.1", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker v6.2", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET","POST","OPTIONS"], allow_headers=["*"])
 
@@ -776,13 +822,14 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 async def root():
     et = et_now()
     return {
-        "status": "ok", "version": "6.1",
+        "status": "ok", "version": "6.2",
         "et_time": et.strftime("%Y-%m-%d %H:%M ET"),
         "active":  is_active_hours(),
         "schedule": f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
         "last_fetch": _last_fetch_ts.isoformat() if _last_fetch_ts else None,
         "thresholds": {"recommend": THRESHOLD_RECOMMEND, "steam": THRESHOLD_STEAM, "watch": THRESHOLD_WATCH},
-        "decision_window": f"ET {DECISION_ET_HOUR:02d}:{DECISION_ET_MIN:02d}（台灣 22:35）鎖定 pick + line_at_pick",
+        "lock_window": f"每場比賽開賽前 {MIN_MINUTES_TO_GAME}分鐘～{LOCK_WINDOW_MAX_HOURS}小時（v6.2起：相對每場比賽自己的開賽時間，不用固定時鐘）",
+        "human_reference_time": f"ET {DECISION_ET_HOUR:02d}:{DECISION_ET_MIN:02d}（台灣 22:35）——純粹給人看的參考時間，跟後端鎖定邏輯已脫鉤",
         "in_decision_window": in_decision_window(),
         "settle_basis": "line_at_pick（鎖定當下的真實可下注盤口）",
         "stats_policy": f"Wilson 95% 下界 > {BREAKEVEN_WR}% 且樣本 ≥ {MIN_SAMPLE_FOR_CLAIM} 才算有 edge",
@@ -1072,12 +1119,14 @@ async def get_summary():
     today    = et_date_str()
     ts_now   = utc_now()
     et_time  = et_now()
+    # taiwan_ready 純粹是「現在適不適合人類來看結果」的顯示用參考，
+    # 跟後端鎖定邏輯已經脫鉤（v6.2 起鎖定看每場比賽自己的相對開賽時間，不看這個）。
     taiwan_ready = in_decision_window()
 
-    # 進入決策窗口 → 順手鎖定（idempotent，已鎖的不覆蓋）
-    # 保證使用者「看到的那個盤口」就是之後結算對帳的盤口。
-    if taiwan_ready:
-        await lock_picks()
+    # 每次有人開 /summary 就順手跑一次鎖定（idempotent，已鎖的不覆蓋，成本很低）。
+    # 附加好處：如果服務因為 Render 免費方案休眠，使用者打開網站這個動作本身
+    # 就會把服務叫醒並觸發一次鎖定評估，等於多一個非排程的鎖定機會。
+    await lock_picks()
 
     docs     = await get_db()["snapshots"].find({"date": today}).sort("commence_time",1).to_list(50)
 
@@ -1504,21 +1553,25 @@ async def get_picks():
 @app.get("/diagnostics/locks")
 async def get_lock_diagnostics(days: int = 14):
     """
-    鎖定漏斗診斷（v6.1）：回答「為什麼誠實樣本累積這麼慢」。
+    鎖定漏斗診斷（v6.2）：回答「為什麼誠實樣本累積這麼慢」。
 
-    每場比賽在決策窗口都會被分類到一個結果：
+    每場比賽在（相對開賽時間的）鎖定視窗內都會被分類到一個結果：
       locked              成功鎖定（正式 pick 或影子 pick）
-      no_signal           移動幅度沒到 STEAM 門檻（<1.0）—— 目前最可能是最大瓶頸，
-                           WATCH(0.5-0.9)/FLAT 都會落在這裡，永遠不會被鎖定
+      no_signal           移動幅度沒到 STEAM 門檻（<1.0）——WATCH(0.5-0.9)/FLAT
+                           都會落在這裡，永遠不會被鎖定
       insufficient_snapshots  快照 <2 筆，資料不夠判斷方向
       too_close_to_game   評估時已經來不及下注（<20分鐘開賽）
+      too_early           離開賽還太久（>8小時），下一輪還會再評估，非最終結果
       no_line             最新快照沒有 total 盤口
       already_locked      今天稍早已經鎖過（正常，不是問題）
 
-    只看 no_signal 佔比高不高，就知道問題是「門檻太嚴」還是「市場本來就很少大幅移動」。
+    v6.2 新增：missing_days —— 這段期間內完全沒有任何診斷紀錄的日期。
+    如果 MLB 那天有賽程但這裡是空的，代表排程那天根本沒執行到（服務休眠的訊號，
+    不是市場沒信號——市場沒信號會留下 no_signal 紀錄，服務沒醒來則什麼紀錄都不會有）。
     """
     ts     = utc_now()
-    cutoff = et_date_str(ts - timedelta(days=days))
+    cutoff_date = ts - timedelta(days=days)
+    cutoff = et_date_str(cutoff_date)
     docs   = await get_db()["lock_diag"].find({"date": {"$gte": cutoff}}).to_list(2000)
 
     by_date = {}
@@ -1530,9 +1583,14 @@ async def get_lock_diagnostics(days: int = 14):
         by_date[date][outc] += 1
         totals[outc] = totals.get(outc, 0) + 1
 
+    # 這段期間內，完全沒有任何診斷紀錄的日期（強烈暗示服務那天沒醒來執行過）
+    all_dates = {et_date_str(cutoff_date + timedelta(days=i)) for i in range(days + 1)}
+    missing_days = sorted(all_dates - set(by_date.keys()))
+
     total_evaluated = sum(totals.values())
     total_locked    = totals.get("locked", 0)
     total_no_signal = totals.get("no_signal", 0)
+    total_too_close = totals.get("too_close_to_game", 0)
 
     return {
         "period_days":       days,
@@ -1540,11 +1598,18 @@ async def get_lock_diagnostics(days: int = 14):
         "total_locked":      total_locked,
         "lock_rate":         round(total_locked/total_evaluated*100, 1) if total_evaluated else None,
         "no_signal_rate":    round(total_no_signal/total_evaluated*100, 1) if total_evaluated else None,
+        "too_close_rate":    round(total_too_close/total_evaluated*100, 1) if total_evaluated else None,
         "by_outcome":        totals,
         "by_date":           dict(sorted(by_date.items())),
-        "note": ("no_signal 佔比高 = 大部分場次移動幅度就是沒到 1.0，這可能是市場本來就效率高、"
-                 "大幅移動罕見（正常），也可能代表 STEAM 門檻對現在的資料量來說太嚴——"
-                 "但降門檻是策略決定，不在這支診斷端點的職責內，交給你自己判斷。"),
+        "missing_days":      missing_days,
+        "missing_days_count": len(missing_days),
+        "note": ("no_signal 佔比高 = 移動幅度沒到門檻，可能是市場本來就效率高（正常），"
+                 "也可能是 STEAM 門檻太嚴——降門檻是策略決定，不在這支診斷端點的職責內。"
+                 " too_close_to_game 佔比高 = v6.2 已經改成相對開賽時間評估，理論上會下降；"
+                 "如果還是很高，可能要考慮拉長排程頻率或縮短 MIN_MINUTES_TO_GAME。"
+                 " missing_days 不是空的 = 那幾天服務很可能整天沒被喚醒執行過排程"
+                 "（常見成因：Render 免費方案閒置休眠），建議設外部服務定期 ping 保持喚醒，"
+                 "這不是本系統程式碼能自己解決的，需要外部 keep-alive。"),
         "generated_at":      ts.isoformat(),
     }
 
