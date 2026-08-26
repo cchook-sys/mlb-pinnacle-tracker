@@ -1,5 +1,14 @@
 """
-MLB Pinnacle Tracker v6.2
+MLB Pinnacle Tracker v6.3
+
+v6.3（2026-08-26）── UptimeRobot 的 monitor 顯示「Down 2mo10d」，查了才發現跟服務
+死活完全無關：
+- [重大修正] 根路徑「/」原本只註冊 GET，UptimeRobot（以及很多監控工具、健康檢查
+  探針）預設送 HEAD 請求探測，FastAPI/Starlette 不像 Flask 會自動幫 GET 路由補上
+  HEAD 支援，於是每次探測都被回 405 Method Not Allowed。這個 monitor 從建立那天
+  （6/16）起，每一次檢查都因為方法不對被判定「Down」，累積了兩個多月的假警報——
+  但同一段時間的 Render log 顯示 GET 請求全程 200 OK，服務其實從頭到尾都健康。
+  改成 `@app.api_route("/", methods=["GET","HEAD"])` 後兩種方法都能正常回應。
 
 v6.2（2026-08-17）── /diagnostics/locks 跑出來，發現瓶頸比「市場少見大幅移動」更根本：
 - [重大修正] 鎖定判斷從「固定時鐘（ET 10:35 全部比賽共用）」改成「相對每場比賽自己的
@@ -808,21 +817,27 @@ async def lifespan(app: FastAPI):
     await fetch_and_settle()
     await daily_model_correction()
     asyncio.create_task(scheduler())
-    log.info(f"⏰ v6.2 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
+    log.info(f"⏰ v6.3 Scheduler: ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min")
     log.info(f"🔒 鎖定視窗：每場開賽前 {MIN_MINUTES_TO_GAME}分鐘～{LOCK_WINDOW_MAX_HOURS}小時內（相對每場比賽，非固定時鐘）")
     yield
     if client_db: client_db.close()
 
-app = FastAPI(title="MLB Pinnacle Tracker v6.2", lifespan=lifespan)
+app = FastAPI(title="MLB Pinnacle Tracker v6.3", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET","POST","OPTIONS"], allow_headers=["*"])
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-@app.get("/")
+# v6.3：根路徑同時支援 GET 和 HEAD。原因：UptimeRobot（以及不少其他監控工具、
+# 健康檢查探針）預設用 HEAD 探測以省流量，但 FastAPI／Starlette 不像 Flask
+# 會自動幫 GET 路由補上 HEAD 支援——只註冊 GET 的話，HEAD 一律回 405。
+# 這造成了一個持續兩個多月的假警報：UptimeRobot 的 monitor 從建立那天起
+# 每次檢查都收到 405，被判定「Down」，但實際上 GET 請求全程 200 OK、
+# 服務從頭到尾都是健康的，純粹是方法不對而已。
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     et = et_now()
     return {
-        "status": "ok", "version": "6.2",
+        "status": "ok", "version": "6.3",
         "et_time": et.strftime("%Y-%m-%d %H:%M ET"),
         "active":  is_active_hours(),
         "schedule": f"ET {ACTIVE_START:02d}:00–{ACTIVE_END:02d}:00 every {FETCH_INTERVAL_MINS}min",
